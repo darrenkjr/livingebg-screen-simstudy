@@ -177,3 +177,7 @@ cython_debug/
 
 # data types 
 *.parquet
+
+#project specific stuff 
+results/
+logs/
