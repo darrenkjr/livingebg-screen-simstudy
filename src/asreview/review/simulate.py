@@ -23,7 +23,7 @@ from asreview.project import open_state
 from asreview.review import BaseReview
 from asreview.review.base import LABEL_NA
 from asreview.utils import get_random_state
-
+from extensions.stopping_criteria import BaseStoppingCriterion
 
 def sample_prior_knowledge(
     labels, n_prior_included=10, n_prior_excluded=10, random_state=None
@@ -269,14 +269,19 @@ class ReviewSimulate(BaseReview):
         # if the pool is empty, always stop
         if self.pool.empty:
             return True
+            # Handle stopping criterion objects
+        if isinstance(self.stop_if, BaseStoppingCriterion):
+            with open_state(self.project) as state:
+                should_stop = self.stop_if(state)
+                return should_stop
 
         # If stop_if is set to min, stop when all papers in the pool are
         # irrelevant.
-        if self.stop_if == "min" and (self.data_labels[self.pool] == 0).all():
+        elif self.stop_if == "min" and (self.data_labels[self.pool] == 0).all():
             return True
 
         # Stop when reaching stop_if (if provided)
-        if isinstance(self.stop_if, int) and self.total_queries >= self.stop_if:
+        elif isinstance(self.stop_if, int) and self.total_queries >= self.stop_if:
             return True
 
         return False

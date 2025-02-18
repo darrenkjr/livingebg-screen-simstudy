@@ -18,7 +18,6 @@ class BaseStoppingCriterion(ABC):
         should_stop = self.should_stop(state)
         if should_stop and not self._stopped:
             self._stopped = True
-            self._stopped_at = len(state.labeled)
         return should_stop
 
 class TimeBasedCriterion(BaseStoppingCriterion):
@@ -30,14 +29,15 @@ class TimeBasedCriterion(BaseStoppingCriterion):
         percentage : float
             Percentage of total abstracts to screen (0.1 to 1.0)
         """
-        if not 0.1 <= percentage <= 1.0:
-            raise ValueError("Percentage must be between 0.1 and 1.0")
+        if not 0.01 <= percentage <= 1.0:
+            raise ValueError("Percentage must be between 0.01 and 1.0")
         super().__init__(f"time_based_{percentage}")
         self.percentage = percentage
+        self.name = f"time_based_{percentage}"
         
     def should_stop(self, state) -> bool:
-        total_papers = len(state.record_table)
-        reviewed_papers = len(state.labeled)
+        total_papers = state.n_records
+        reviewed_papers = len(state.get_labeled())
         return reviewed_papers >= self.percentage * total_papers
 
 class ConsecutiveIrrelevantCriterion(BaseStoppingCriterion):
@@ -53,28 +53,27 @@ class ConsecutiveIrrelevantCriterion(BaseStoppingCriterion):
             raise ValueError("Percentage must be between 0.01 and 0.1")
         super().__init__(f"consecutive_{percentage}")
         self.percentage = percentage
+        self.name = f"consecutive_irrelevant_{percentage}"
         
     def should_stop(self, state) -> bool:
-        if len(state.labeled) == 0:
-            return False
-        label_col = [col for col in state.record_table.columns if 'label_' in col]   
-        total_papers = len(state.record_table)
+
+        labelled = state.get_labeled()
+        total_papers = state.n_records
         window_size = int(self.percentage * total_papers)
 
         if window_size < 10: 
             window_size = 10 
-        if len(state.labeled) < window_size:
+        if len(labelled) < window_size:
             return False
             
         # Check last n papers where n is window_size
-        recent_labels = state.labeled[label_col].tail(window_size)
+        recent_labels = labelled.tail(window_size)
         #retrieve label columns 
-        
-        if len(label_col) > 1 : 
-            #multilabel case 
-            return not recent_labels.any().any() #will return true if there are no rlevant labels left 
+        irrelevant_labels = recent_labels[recent_labels['label'] == 0].sum()
+        if irrelevant_labels >= window_size:
+            return True
         else: 
-            return (recent_labels['label'] == 0).all() #returns true if labels are 0 
+            return False
 
 
 
@@ -120,6 +119,7 @@ class StatisticalCriterion(BaseStoppingCriterion):
         self.recall_target = recall_target
         self.pval_target = pval_target
         super().__init__(f"statistical_{recall_target}_{pval_target}")
+        self.name = f"statistical_{recall_target}_{pval_target}"
 
     def should_stop(self, state) -> bool:
         '''
@@ -131,19 +131,11 @@ class StatisticalCriterion(BaseStoppingCriterion):
         '''
 
         #check for multilabel case 
-        label_col = [col for col in state.record_table.columns if 'label_' in col]
-        if len(label_col) > 1 : 
-            #multilabel case 
-            #create a binary label column 
-            state
-        else: 
-            #binary case 
-            pass 
-
-
+        total_papers = state.n_records
+        labelled = state.get_labeled()
 
         # evaluate null hypothesios and calculate pvalue, dont stop until pvalue is below target pval 
-        current_pval = calculate_h0(N = len(state.record_table), labels_ = state.labeled['label'], recall_target = self.recall_target)
+        current_pval = calculate_h0(N = total_papers, labels_ = labelled['label'], recall_target = self.recall_target)
         return current_pval < self.pval_target
 
 
@@ -152,27 +144,32 @@ def CreateSimulationStoppingCriterion(criterion_type: str, **kwargs):
     Factory function to create stopping criteria for simulations.
     
     '''
-
     if criterion_type == "time":
         max_screened_limit = kwargs.get('max_screened_limit', 1.0)
-        starting_limit = 0.1
-        assert 0.1 <= max_screened_limit <= 1.0, "max_screened_limit must be between 0.1 and 1.0"
+        starting_limit = 0.01
+        assert 0.01 <= max_screened_limit <= 1.0, "max_screened_limit must be between 0.1 and 1.0"
         current_limit = starting_limit
         while current_limit < max_screened_limit:
-            yield TimeBasedCriterion(current_limit)
-            current_limit += 0.1
+            yield TimeBasedCriterion(current_limit), current_limit
+            if current_limit < 0.1:
+                current_limit += 0.01
+            else: 
+                current_limit += 0.1
     
     elif criterion_type == "consecutive_irrelevant":
         max_irrelevant_limit = kwargs.get('max_irrelevant_limit', 0.1)
-        starting_limit = 0.01
-        assert 0.01 <= max_irrelevant_limit <= 0.1, "max_irrelevant_limit must be between 0.01 and 0.1"
+        starting_limit = 0.001
+        assert 0.001 <= max_irrelevant_limit <= 0.1, "max_irrelevant_limit must be between 0.01 and 0.1"
         current_limit = starting_limit
         while current_limit < max_irrelevant_limit:
-            yield ConsecutiveIrrelevantCriterion(current_limit)
-            current_limit += 0.01
+            yield ConsecutiveIrrelevantCriterion(current_limit), current_limit
+            if current_limit < 0.001:
+                current_limit += 0.001
+            else: 
+                current_limit += 0.01
 
     elif criterion_type == "statistical":
         recall_target = kwargs.get('recall_target', 0.95)
         pval_target = kwargs.get('pval_target', 0.05)
-        yield StatisticalCriterion(recall_target, pval_target)
+        yield StatisticalCriterion(recall_target, pval_target), (recall_target, pval_target)
 

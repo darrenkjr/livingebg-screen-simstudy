@@ -14,6 +14,7 @@
 
 __all__ = []
 
+from extensions.stopping_criteria import BaseStoppingCriterion
 
 def type_n_queries(value):
     """Custom type used for --n_queries argument.
@@ -28,16 +29,22 @@ def type_n_queries(value):
     type_n_queries:
         A string containing 'min' or an integer.
     """
-    if value == "min":
-        return value
-    else:
-        try:
-            value_i = int(value)
 
-            # convert -1 to None
-            if value_i == -1:
-                return None
+    if isinstance(value, BaseStoppingCriterion): 
+        return value.name
+    
+    elif isinstance(value, str) or isinstance(value, int):
 
-            return value_i
-        except ValueError:
-            raise ValueError("Expected 'min' or a valid integer")
+        if value == "min":
+            return value
+        else:
+            try:
+                value_i = int(value)
+
+                # convert -1 to None
+                if value_i == -1:
+                    return None
+
+                return value_i
+            except ValueError:
+                raise ValueError("Expected 'min' or a valid integer")
