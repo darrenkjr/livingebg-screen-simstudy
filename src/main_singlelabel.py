@@ -8,6 +8,9 @@ from convenience.logging_config import LoggerConfig
 import pandas as pd
 from asreview.models.classifiers import NaiveBayesClassifier, LogisticClassifier, RandomForestClassifier, SVMClassifier
 from asreview.models.feature_extraction import Tfidf
+from asreview.models.feature_extraction.sbert import SBERT
+from asreview.models.feature_extraction.specter2 import specter2
+from asreview.models.feature_extraction.modernbert import modernbert
 from asreview.models.query import MaxQuery
 from asreview.models.balance import DoubleBalance
 from extensions.stopping_criteria import CreateSimulationStoppingCriterion   
@@ -66,23 +69,20 @@ except AssertionError:
 
 
 classifier_interest = ['lr', 'rf', 'svm', 'nb']
-feature_extract_interest = ['tfidf']
-stopcriterion_interest = ['consecutive_irrelevant','time',  'statistical']
-#load classifier classes 
-lr_model = LogisticClassifier()
-rf_model = RandomForestClassifier()
-svm_model = SVMClassifier()
-nb_model = NaiveBayesClassifier()
-#load feature extractor classes 
-tfidf_feature_extractor = Tfidf()
+feature_extract_interest = ['modernbert','specter2','sbert', 'tfidf']
+stopcriterion_interest = ['statistical','consecutive_irrelevant','time']
+
 classifer_dct = {
-    'lr': lr_model,
-    'rf': rf_model,
-    'svm': svm_model,
-    'nb': nb_model
+    'lr': LogisticClassifier(),
+    'rf': RandomForestClassifier(),
+    'svm': SVMClassifier(),
+    'nb': NaiveBayesClassifier()
 }
 feature_extract_dct = {
-    'tfidf': tfidf_feature_extractor
+    'tfidf': Tfidf(),
+    'specter2': specter2(),
+    'sbert': SBERT(),
+    'modernbert': modernbert()
 }
 #use default query strategies 
 query_model = MaxQuery()
@@ -126,12 +126,13 @@ for file in project_datadir.glob('*.csv'):
                     try: 
                         reviewer_sim.review()
                         project.mark_review_finished()
-                        logger.info(f"Simulation finished")
-                        logger.info(f"Exporting simulation results")
-                        project.export(resultdir / f"{file.name}_{classifier}_{feature_extract}_{stopcriterion}_{params if stopcriterion != 'time' or stopcriterion != 'consecutive_irrelevant' else ''}.asreview")
+                        logger.info(f"Simulation finished for params: classifier: {classifier}, feature_extractor: {feature_extract}, stopcriterion: {stopcriterion} params: {params}")
+                        
                     except Exception as e:
                        
-                        raise e
+                        raise 
+
+project.export(resultdir / f"{project.project_name}.asreview")
 
 
 

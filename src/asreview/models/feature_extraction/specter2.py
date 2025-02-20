@@ -5,6 +5,8 @@ try:
     from adapters import AutoAdapterModel
     import numpy as np 
     import torch
+    from tqdm import tqdm
+
 except ImportError:
     SPEC2_AVAILABLE = False
 else:
@@ -18,24 +20,22 @@ def _check_st():
         raise ImportError("Install sentence-transformers package to use Sentence BERT.")
 
 
-class SPECTER2(BaseFeatureExtraction):
-    """SPECTER2 feature extraction technique with classification adapter."""
+class specter2(BaseFeatureExtraction):
+    """specter2 feature extraction technique with classification adapter."""
     
     name = "specter2"
-    label = "SPECTER2"
+    label = "specter2"
 
     def __init__(
         self,
         *args,
         base_model="allenai/specter2_base",
-        adapter_model="allenai/specter2_classification",
         batch_size=32,
         device="cuda" if torch.cuda.is_available() else "cpu",
         **kwargs
     ):
-        super(SPECTER2, self).__init__(split_ta=0, use_keywords=0)
+        super(specter2, self).__init__(split_ta=1, use_keywords=0)
         self.base_model = base_model
-        self.adapter_model = adapter_model
         self.batch_size = batch_size
         self.device = device
         
@@ -46,55 +46,63 @@ class SPECTER2(BaseFeatureExtraction):
         self.model = AutoAdapterModel.from_pretrained(self.base_model).to(self.device)
         
         # Load and activate the classification adapter
-        self.model.load_adapter(
-            self.adapter_model, 
-            source="hf", 
-            load_as="classification", 
-            set_active=True
-        )
         self.model.eval()
+
+    def fit_transform(self, texts, titles=None, abstracts=None, keywords=None):
+        if self.split_ta > 0:
+            if titles is None or abstracts is None:
+                raise ValueError(
+                    "Error: if splitting titles and abstracts, supply them!"
+                )
+                
+            print('Preprocessing texts...')
+            # Convert numpy arrays to lists for the tokenizer
+            titles = titles.tolist() if isinstance(titles, np.ndarray) else titles
+            abstracts = abstracts.tolist() if isinstance(abstracts, np.ndarray) else abstracts
+            
+            # Combine with sep token
+            sep_token = self.tokenizer.sep_token
+            texts = [f"{title}{sep_token}{abstract}" for title, abstract in zip(titles, abstracts)]
+            print(f'Combined {len(texts)} texts with separator token')
+        else:
+            # If texts is numpy array, convert to list
+            texts = texts.tolist() if isinstance(texts, np.ndarray) else texts
+
+        X = self.transform(texts)
+        return X
+            
 
     def transform(self, texts):
         """Transform texts into feature vectors."""
-        if not isinstance(texts, np.ndarray):
-            texts = np.array(texts)
-
         features = []
-        total_batches = (len(texts) + self.batch_size - 1) // self.batch_size
-        
-        print(f"Encoding {len(texts)} texts using SPECTER2...")
-        
-        for i in range(0, len(texts), self.batch_size):
-            batch_texts = texts[i:i + self.batch_size]
-            
-            # Concatenate title and abstract with sep_token
-            text_batch = [
-                title.strip() + self.tokenizer.sep_token + abstract.strip()
-                for text in batch_texts
-                for title, abstract in [str(text).split('\n', 1) + [''] 
-                    if len(str(text).split('\n', 1)) == 1 
-                    else str(text).split('\n', 1)]
-            ]
+        print('Encoding texts with SPECTER2')
+        # Create progress bar for total texts
+        with tqdm(
+            total=len(texts), 
+            desc="Encoding texts with SPECTER2",
+            position=0,  # Keep at position 0
+            leave=True,  # Leave the progress bar
+            ncols=80  # Fixed width
+        ) as pbar:
+            for i in range(0, len(texts), self.batch_size):
+                batch_texts = texts[i:i + self.batch_size]
+                
+                inputs = self.tokenizer(
+                    batch_texts,
+                    padding=True,
+                    truncation=True,
+                    return_tensors="pt",
+                    return_token_type_ids=False,
+                    max_length=512
+                ).to(self.device)
 
-            # Preprocess the input
-            inputs = self.tokenizer(
-                text_batch,
-                padding=True,
-                truncation=True,
-                return_tensors="pt",
-                return_token_type_ids=False,
-                max_length=512
-            ).to(self.device)
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    batch_features = outputs.last_hidden_state[:, 0].cpu().numpy()
+                    features.append(batch_features)
 
-            # Get embeddings
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                batch_features = outputs.last_hidden_state[:, 0].cpu().numpy()
-                features.append(batch_features)
+                # Update progress for each text in batch
+                pbar.update(len(batch_texts))
 
-            if (i // self.batch_size) % 100 == 0:
-                print(f"Processed {i//self.batch_size}/{total_batches} batches")
-
-        # Combine all batches
         X = np.vstack(features)
         return X
