@@ -271,6 +271,7 @@ class ReviewSimulate(BaseReview):
             return True
             # Handle stopping criterion objects
         if isinstance(self.stop_if, BaseStoppingCriterion):
+            print(f'Stopping criterion detected')
             with open_state(self.project) as state:
                 should_stop = self.stop_if(state)
                 return should_stop

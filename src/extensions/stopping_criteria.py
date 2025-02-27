@@ -38,6 +38,7 @@ class TimeBasedCriterion(BaseStoppingCriterion):
     def should_stop(self, state) -> bool:
         total_papers = state.n_records
         reviewed_papers = len(state.get_labeled())
+        print(f'Total papers: {total_papers}, Reviewed papers: {reviewed_papers}')
         return reviewed_papers >= self.percentage * total_papers
 
 class ConsecutiveIrrelevantCriterion(BaseStoppingCriterion):

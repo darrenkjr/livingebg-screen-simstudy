@@ -1,24 +1,12 @@
 __all__ = ["specter2"]
 
-try:
-    from transformers import AutoTokenizer
-    from adapters import AutoAdapterModel
-    import numpy as np 
-    import torch
-    from tqdm import tqdm
 
-except ImportError:
-    SPEC2_AVAILABLE = False
-else:
-    SPEC2_AVAILABLE = True
-
+from transformers import AutoTokenizer
+import torch
+from adapters import AutoAdapterModel
+import numpy as np 
+from tqdm import tqdm
 from asreview.models.feature_extraction.base import BaseFeatureExtraction
-
-
-def _check_st():
-    if not SPEC2_AVAILABLE:
-        raise ImportError("Install sentence-transformers package to use Sentence BERT.")
-
 
 class specter2(BaseFeatureExtraction):
     """specter2 feature extraction technique with classification adapter."""
@@ -44,9 +32,6 @@ class specter2(BaseFeatureExtraction):
         # Initialize tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model)
         self.model = AutoAdapterModel.from_pretrained(self.base_model).to(self.device)
-        
-        # Load and activate the classification adapter
-        self.model.eval()
 
     def fit_transform(self, texts, titles=None, abstracts=None, keywords=None):
         if self.split_ta > 0:
