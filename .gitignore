@@ -181,3 +181,4 @@ cython_debug/
 #project specific stuff 
 results/
 logs/
+*.md
