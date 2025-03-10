@@ -62,6 +62,8 @@ class BaseReview(ABC):
         n_instances=DEFAULT_N_INSTANCES,
         stop_if=None,
         start_idx=[],
+        review_id=None,
+        eval_set=None
     ):
         """Initialize the reviewer base class, so that everything is ready to
         train a new model."""
@@ -79,7 +81,8 @@ class BaseReview(ABC):
         self.n_instances = n_instances
         self.stop_if = stop_if
         self.prior_indices = start_idx
-
+        self.review_id = review_id
+        self.eval_set = eval_set
         if n_papers is not None:
             logging.warning("Argument n_papers is deprecated, ignoring n_papers.")
 
@@ -88,13 +91,15 @@ class BaseReview(ABC):
         if self.data_labels is None:
             self.data_labels = np.full(len(as_data), LABEL_NA)
 
-        with open_state(self.project, read_only=False) as state:
+        with open_state(self.project, read_only=False, review_id=self.review_id) as state:
             # If the state is empty, add the settings.
+            print(f'Checking if state is empty for review id: {self.review_id}')
             if state.is_empty():
                 state.settings = self.settings
-
+                print(f'State is empty for review id: {self.review_id}, adding settings')
             # Add the record table to the state if it is not already there.
             self.record_table = state.get_record_table()
+            print(f'Record table length for review id: {self.review_id} is {len(self.record_table)}')
             if self.record_table.empty:
                 state.add_record_table(as_data.record_ids)
                 self.record_table = state.get_record_table()
@@ -158,7 +163,7 @@ class BaseReview(ABC):
         """Do a full review."""
         # Label any pending records.
 
-        with open_state(self.project, read_only=False) as s:
+        with open_state(self.project, review_id=self.review_id, read_only=False) as s:
             pending = s.get_pending()
             if not pending.empty:
                 self._label(pending)
@@ -168,13 +173,13 @@ class BaseReview(ABC):
         # progress bars
         pbar_rel = tqdm(
             initial=sum(labels_prior),
-            total=sum(self.as_data.labels),
+            total=len(self.eval_set) if self.eval_set is not None else 764,
             desc="Relevant records found",
         )
         pbar_total = tqdm(
             initial=len(labels_prior),
             total=len(self.as_data),
-            desc="Records labeled       ",
+            desc="Records labeled ",
         )
 
         # While the stopping condition has not been met:
@@ -199,7 +204,7 @@ class BaseReview(ABC):
 
     def _label_priors(self):
         """Make sure the prior records are labeled."""
-        with open_state(self.project, read_only=False) as state:
+        with open_state(self.project, read_only=False, review_id=self.review_id) as state:
             labeled = state.get_labeled()
             unlabeled_priors = [
                 x for x in self.prior_indices if x not in labeled["record_id"].to_list()
@@ -218,7 +223,7 @@ class BaseReview(ABC):
         stop = False
 
         # Get the pool and labeled. There never should be pending papers here.
-        with open_state(self.project) as state:
+        with open_state(self.project, review_id=self.review_id) as state:
             pool, labeled, _ = state.get_pool_labeled_pending()
 
         # if the pool is empty, always stop
@@ -231,7 +236,7 @@ class BaseReview(ABC):
             stop = True
         # Otherwise, stop when reaching stop_if (if provided)
         elif self.stop_if is not None:
-            with open_state(self.project) as state:
+            with open_state(self.project, review_id=self.review_id) as state:
                 training_sets = state.get_training_sets()
                 # There is one query per trained model. We subtract 1
                 # for the priors.
@@ -255,7 +260,7 @@ class BaseReview(ABC):
             List of record_ids of the n top ranked records according to the last
             ranking saved in the state.
         """
-        with open_state(self.project, read_only=False) as s:
+        with open_state(self.project, read_only=False, review_id=self.review_id) as s:
             top_n_records = s.query_top_ranked(n)
         return top_n_records
 
@@ -271,13 +276,13 @@ class BaseReview(ABC):
         """
         labels = self.data_labels[record_ids]
 
-        with open_state(self.project, read_only=False) as s:
+        with open_state(self.project, read_only=False, review_id=self.review_id) as s:
             s.add_labeling_data(record_ids, labels, prior=prior)
 
     def train(self):
         """Train a new model on the labeled data."""
         # Check if both labels are available.
-        with open_state(self.project) as state:
+        with open_state(self.project, review_id=self.review_id) as state:
             labeled = state.get_labeled()
             labels = labeled["label"].to_list()
             training_set = len(labeled)
@@ -308,7 +313,7 @@ class BaseReview(ABC):
         )
 
         # Log the ranking in the state.
-        with open_state(self.project, read_only=False) as state:
+        with open_state(self.project, read_only=False, review_id=self.review_id) as state:
             state.add_last_ranking(
                 ranked_record_ids,
                 self.classifier.name,

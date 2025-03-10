@@ -159,7 +159,8 @@ class ReviewSimulate(BaseReview):
     ):
         self.n_prior_included = n_prior_included
         self.n_prior_excluded = n_prior_excluded
-
+        self.review_id = kwargs.get('review_id', None)
+        self.eval_set = kwargs.get('eval_set', None)
         self.write_interval = write_interval
 
         # check for partly labeled data
@@ -189,7 +190,8 @@ class ReviewSimulate(BaseReview):
 
         # Setup the reviewer attributes that take over the role of state
         # functions.
-        with open_state(self.project) as state:
+        with open_state(self.project, review_id=self.review_id) as state:
+            print(f'review_id: {self.review_id}, project: {self.project}')
             # Check if there is already a ranking stored in the state.
             if state.model_has_trained:
                 self.last_ranking = state.get_last_ranking()
@@ -242,7 +244,7 @@ class ReviewSimulate(BaseReview):
     def _label_priors(self):
         """Make sure all the priors are labeled as well as the pending
         labels."""
-        with open_state(self.project, read_only=False) as state:
+        with open_state(self.project, review_id=self.review_id, read_only=False) as state:
             # Make sure the prior records are labeled.
             labeled = state.get_labeled()
             unlabeled_priors = [
@@ -250,7 +252,7 @@ class ReviewSimulate(BaseReview):
             ]
             labels = self.data_labels[unlabeled_priors]
 
-            with open_state(self.project, read_only=False) as s:
+            with open_state(self.project, review_id=self.review_id, read_only=False) as s:
                 s.add_labeling_data(unlabeled_priors, labels, prior=True)
 
             # Make sure the pending records are labeled.
@@ -270,9 +272,8 @@ class ReviewSimulate(BaseReview):
         if self.pool.empty:
             return True
             # Handle stopping criterion objects
-        if isinstance(self.stop_if, BaseStoppingCriterion):
-            print(f'Stopping criterion detected')
-            with open_state(self.project) as state:
+        elif isinstance(self.stop_if, BaseStoppingCriterion):
+            with open_state(self.project, review_id=self.review_id) as state:
                 should_stop = self.stop_if(state)
                 return should_stop
 
@@ -370,7 +371,7 @@ class ReviewSimulate(BaseReview):
 
         if (self.write_interval is not None) and (
             len(self.results) >= self.write_interval
-        ):
+        ): 
             self._write_to_state()
 
         return labels
@@ -380,7 +381,7 @@ class ReviewSimulate(BaseReview):
         # Write the data to the state.
         if len(self.results) > 0:
             rows = [tuple(self.results.iloc[i]) for i in range(len(self.results))]
-            with open_state(self.project, read_only=False) as state:
+            with open_state(self.project, review_id=self.review_id, read_only=False) as state:
                 state._add_labeling_data_simulation_mode(rows)
 
                 state.add_last_ranking(

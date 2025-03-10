@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 import numpy as np
 from typing import List, Optional, Union
-from buscarpy import calculate_h0, recall_frontier, retrospective_h0
+from buscarpy import calculate_h0
+import pandas as pd 
 
 class BaseStoppingCriterion(ABC):
     """Base class for all stopping criteria"""
@@ -82,29 +83,31 @@ class ConsecutiveIrrelevantCriterion(BaseStoppingCriterion):
 
 
 
-class MixedHeuristicCriterion(BaseStoppingCriterion):
-    """Combined strategy using both time-based and consecutive irrelevant criteria"""
-    def __init__(self, 
-                 min_screened_percentage: float = 0.2,
-                 consecutive_irrelevant_percentage: float = 0.05):
-        """
-        Parameters
-        ----------
-        min_screened_percentage : float
-            Minimum percentage of total abstracts to screen (0.1 to 1.0)
-        consecutive_irrelevant_percentage : float
-            Percentage of consecutive irrelevant abstracts (0.01 to 0.1)
-        """
-        super().__init__(f"mixed_{min_screened_percentage}_{consecutive_irrelevant_percentage}")
-        self.time_criterion = TimeBasedCriterion(min_screened_percentage)
-        self.consecutive_criterion = ConsecutiveIrrelevantCriterion(consecutive_irrelevant_percentage)
+class FixedRecallCriterion(BaseStoppingCriterion): 
+    """Stop when 95% of all relevant records have been identified"""
+    def __init__(self, label_matrix, target_recall=0.95, eval_set = None):
+        super().__init__(f"fixed_recall_{target_recall}")
+        self.label_matrix = label_matrix
+        self.target_recall = target_recall
+        # Calculate total relevant records
+        self.total_relevant = len(eval_set)
+        self.found_relevant = set()
         
     def should_stop(self, state) -> bool:
-        # Must meet both conditions:
-        # 1. Minimum percentage of abstracts screened
-        # 2. Required consecutive irrelevant abstracts found
-        return (self.time_criterion.should_stop(state) and 
-                self.consecutive_criterion.should_stop(state))
+        # Get recently labeled records
+        labeled = state.get_labeled()
+        
+        # Update found relevant records
+        for idx, row in labeled.iterrows():
+            record_id = row['record_id']
+            if record_id not in self.found_relevant and row['label'] == 1:
+                self.found_relevant.add(record_id)
+        
+        # Calculate current recall
+        current_recall = len(self.found_relevant) / self.total_relevant
+        assert current_recall <= 1 
+        
+        return current_recall >= self.target_recall
     
 
 class StatisticalCriterion(BaseStoppingCriterion):
@@ -173,7 +176,7 @@ def CreateSimulationStoppingCriterion(criterion_type: str, **kwargs):
             yield ConsecutiveIrrelevantCriterion(limit), limit
 
     elif criterion_type == "statistical":
-        recall_target = kwargs.get('recall_target', 0.99)
+        recall_target = kwargs.get('recall_target', 0.95)
         pval_target = kwargs.get('pval_target', 0.05)
         starting_bias = 1 
         starting_bias_step = 1 
@@ -181,3 +184,12 @@ def CreateSimulationStoppingCriterion(criterion_type: str, **kwargs):
         bias_steps = np.arange(starting_bias, bias_limit+1, starting_bias_step)
         for bias in bias_steps: 
             yield StatisticalCriterion(recall_target, pval_target, bias), (recall_target, pval_target, bias)
+
+    elif criterion_type == "fixedrecall_benchmark": 
+        label_matrix = kwargs.get('label_matrix')
+        recall_target = kwargs.get('recall_target')
+        eval_set = kwargs.get('eval_set')
+        yield FixedRecallCriterion(label_matrix, recall_target, eval_set), recall_target
+    
+    else: 
+        yield None, None

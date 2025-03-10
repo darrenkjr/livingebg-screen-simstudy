@@ -26,7 +26,10 @@ class MultiLabelSimulate(ReviewSimulate):
         write_interval=None,
         n_instances=1,
         stop_if=None,
-        project=None
+        project=None,
+        review_id=None,
+        eval_total_relevant=None, 
+        eval_set=None
     ): 
         # Initialize parent class first
         super().__init__(
@@ -42,7 +45,9 @@ class MultiLabelSimulate(ReviewSimulate):
             write_interval=write_interval,
             n_instances=n_instances,
             stop_if=stop_if,
-            project=project
+            project=project, 
+            review_id=review_id,
+            eval_set=eval_set
         )
         
         # Store multilabel info
@@ -50,6 +55,8 @@ class MultiLabelSimulate(ReviewSimulate):
         self.label_matrix = label_matrix
         self.label_columns = label_columns
         self.random_state = np.random.RandomState(init_seed)
+        self.eval_set = eval_set
+
         
         # Create multilabel classifier by wrapping the base classifier
         self.multilabel_classifier = MultiOutputClassifier(clone(model._model))
@@ -58,7 +65,11 @@ class MultiLabelSimulate(ReviewSimulate):
         if label_matrix is not None:
             # A record is relevant if it's relevant to ANY topic
             self.relevant_mask = np.any(label_matrix == 1, axis=1)
-            self.total_relevant = np.sum(self.relevant_mask)
+            #adjust for the fact that we know the *true* recall, otherwise recall would be inflated
+            if eval_total_relevant is not None:
+                self.total_relevant = eval_total_relevant
+            else: 
+                self.total_relevant = np.sum(self.relevant_mask)
             self.found_relevant = set()  # Track found relevant record IDs
             
             # Initialize global recall
@@ -120,19 +131,15 @@ class MultiLabelSimulate(ReviewSimulate):
         labeled_record_ids = self.labeled["record_id"].values
         labeled_indices = [np.where(self.record_table == rid)[0][0] for rid in labeled_record_ids]
         
-        # Extract features for labeled records
-        X = self.feature_extraction.transform(
-            self.texts[labeled_indices], training=True
-        )
-        
+
+        #attempt to access feature cache if this is a rerun on the same feature extraction technique 
+        X = self.X[labeled_indices]
+
         if self.label_matrix is not None:
             # Extract multilabel matrix for labeled records
             y_multilabel = self.label_matrix[labeled_indices]
             return X, y_multilabel
-        else:
-            # Fallback to binary labels if no multilabel data
-            y = self.labeled["label"].values
-            return X, y
+
     
     def _train_model(self):
         """Train both the binary classifier and multilabel classifier."""
@@ -154,10 +161,7 @@ class MultiLabelSimulate(ReviewSimulate):
     def _get_proba(self, pool_indices):
         """Get relevance probabilities incorporating multilabel information."""
         # Get features for unlabeled records
-        X_pool = self.feature_extraction.transform(
-            self.texts[pool_indices], training=False
-        )
-        
+        X_pool = self.X[pool_indices]
         # First get standard binary probabilities (parent implementation)
         binary_proba = self.classifier.predict_proba(X_pool)[:, 1]
         
@@ -175,13 +179,9 @@ class MultiLabelSimulate(ReviewSimulate):
                 
                 # Return the multilabel probability
                 return max_proba
-            except Exception as e:
-                # Fallback to binary probabilities if multilabel fails
-                print(f"Multilabel prediction failed: {e}. Using binary probabilities.")
-        
-        # If multilabel prediction failed or isn't available yet, use binary probabilities
-        return binary_proba
-    
+            except: 
+                raise 
+
     def _label(self, record_ids, prior=False):
         # Call parent method to handle standard labeling
         labels = super()._label(record_ids, prior)

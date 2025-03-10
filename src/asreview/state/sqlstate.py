@@ -142,7 +142,8 @@ class SQLiteState(BaseState):
 
         # create folder in the folder `results` with the name of result_id
         self._sql_fp.parent.mkdir(parents=True, exist_ok=True)
-
+        print(f'DEBUG: Creating new state file for review id: {review_id}')
+        print(f'DEBUG: SQL file path: {self._sql_fp}')
         # Create results table.
         con = self._connect_to_sql()
         try:
