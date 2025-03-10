@@ -27,8 +27,6 @@ class specter2(BaseFeatureExtraction):
         self.batch_size = batch_size
         self.device = device
         
-        _check_st()
-        
         # Initialize tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model)
         self.model = AutoAdapterModel.from_pretrained(self.base_model).to(self.device)
