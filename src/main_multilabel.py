@@ -19,6 +19,7 @@ from asreview.models.balance import DoubleBalance
 from extensions.stopping_criteria import CreateSimulationStoppingCriterion   
 import uuid 
 import json
+import timeit
 
 # Setup logging
 logger = LoggerConfig.setup_logger(
@@ -174,7 +175,12 @@ for feature_extract in feature_extract_interest:
                     
                     # Run simulation
                     logger.info(f"Running simulation with review ID: {simreview_id}")
+                    start_time = timeit.default_timer()
                     reviewer_sim.review() #expted length of total_eval is 764
+                    end_time = timeit.default_timer()
+                    logger.info(f"Simulation finished in {end_time - start_time} seconds")
+ 
+
                     
                     # Mark as finished
                     feature_project.mark_review_finished(review_id=simreview_id)
@@ -185,7 +191,8 @@ for feature_extract in feature_extract_interest:
                         'feature_extraction': feature_extract, 
                         'classifier': classifier, 
                         'stop_criterion': stopcriterion, 
-                        'stop_params': str(params)
+                        'stop_params': str(params), 
+                        'simulation_time (s)': end_time - start_time
                     }
                     with open(resultdir / f"simulation_metadata_{simreview_id}.json", 'w') as f:
                         json.dump(simulation_metadata, f, indent=2)

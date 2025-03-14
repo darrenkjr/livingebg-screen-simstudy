@@ -59,7 +59,7 @@ class MultiLabelSimulate(ReviewSimulate):
 
         
         # Create multilabel classifier by wrapping the base classifier
-        self.multilabel_classifier = MultiOutputClassifier(clone(model._model))
+        self.multilabel_classifier = MultiOutputClassifier(clone(model._model), n_jobs=-1)
         
         # Calculate total number of relevant records (unique across all topics)
         if label_matrix is not None:
@@ -143,8 +143,6 @@ class MultiLabelSimulate(ReviewSimulate):
     
     def _train_model(self):
         """Train both the binary classifier and multilabel classifier."""
-        # First train the standard binary classifier (parent implementation)
-        super()._train_model()
         
         # Now train the multilabel classifier if we have multilabel data
         if hasattr(self, 'label_matrix') and self.label_matrix is not None:
