@@ -58,7 +58,7 @@ multilabel_df.to_csv(dataset_path, index=False)
 
 # Define models to test 
 classifier_interest = ['lr', 'rf', 'svm', 'nb']
-feature_extract_interest = ['tfidf', 'doc2vec', 'sbert', 'specter2', 'biolinkbert']
+feature_extract_interest = ['tfidf', 'doc2vec', 'sbert','specter2', 'biolinkbert']
 stopcriterion_interest = [None, 'statistical'] #took out time and consecutive irrelevant can look at this retrospectively
 
 classifer_dct = {
@@ -163,10 +163,10 @@ for feature_extract in feature_extract_interest:
                         label_columns=label_cols,
                         n_prior_included=1, 
                         n_prior_excluded=1, 
-                        n_instances=30,
+                        n_instances=50,
                         project=feature_project, 
                         stop_if=stopping_criterion, 
-                        write_interval=30,
+                        write_interval=50,
                         eval_total_relevant=len(eval_data_unique),
                         eval_set=eval_data_unique,
                         review_id=simreview_id
@@ -185,9 +185,10 @@ for feature_extract in feature_extract_interest:
                         'feature_extraction': feature_extract, 
                         'classifier': classifier, 
                         'stop_criterion': stopcriterion, 
-                        'stop_params': params
+                        'stop_params': str(params)
                     }
-                    simconfig_list.append(simulation_metadata)
+                    with open(resultdir / f"simulation_metadata_{simreview_id}.json", 'w') as f:
+                        json.dump(simulation_metadata, f, indent=2)
                     logger.info(f'Simulation finisehd for id: {simreview_id}, recall: {reviewer_sim.global_recall}, classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}, params: {params}')
                     
                 except Exception as e:
