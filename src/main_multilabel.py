@@ -163,10 +163,10 @@ for feature_extract in feature_extract_interest:
                         label_columns=label_cols,
                         n_prior_included=1, 
                         n_prior_excluded=1, 
-                        n_instances=50,
+                        n_instances=30,
                         project=feature_project, 
                         stop_if=stopping_criterion, 
-                        write_interval=50,
+                        write_interval=30,
                         eval_total_relevant=len(eval_data_unique),
                         eval_set=eval_data_unique,
                         review_id=simreview_id
@@ -196,7 +196,3 @@ for feature_extract in feature_extract_interest:
 
     # Export this feature project when done
     feature_project.export(resultdir / f"feature_{feature_extract}.asreview")
-
-# Save all simulation metadata
-simconfig_df = pd.DataFrame(simconfig_list)
-simconfig_df.to_csv(resultdir / "simulation_metadata.csv", index=False)
