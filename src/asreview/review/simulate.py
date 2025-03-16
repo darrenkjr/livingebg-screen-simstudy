@@ -24,6 +24,7 @@ from asreview.review import BaseReview
 from asreview.review.base import LABEL_NA
 from asreview.utils import get_random_state
 from extensions.stopping_criteria import BaseStoppingCriterion
+import timeit
 
 def sample_prior_knowledge(
     labels, n_prior_included=10, n_prior_excluded=10, random_state=None
@@ -272,12 +273,14 @@ class ReviewSimulate(BaseReview):
         if self.pool.empty:
             return True
             # Handle stopping criterion objects
-        elif  (self.data_labels[self.pool] == 1).sum() >= self.data_labels.sum(): 
-            return True
+
 
         elif isinstance(self.stop_if, BaseStoppingCriterion):
+            start_time = timeit.default_timer()
             with open_state(self.project, review_id=self.review_id) as state:
                 should_stop = self.stop_if(state)
+                end_time = timeit.default_timer()
+                print(f"Stopping criterion checking time: {end_time - start_time} seconds")
                 return should_stop
 
         # If stop_if is set to min, stop when all papers in the pool are

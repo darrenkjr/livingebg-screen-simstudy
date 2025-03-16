@@ -153,7 +153,7 @@ for feature_extract in feature_extract_dct.keys():
                 if stopping_criterion == None: 
                     write_interval = 1000
                 else: 
-                    write_interval = 30
+                    write_interval = 25
                 # Create simulation
                 try:
                     reviewer_sim = MultiLabelSimulate(
@@ -167,7 +167,7 @@ for feature_extract in feature_extract_dct.keys():
                         label_columns=label_cols,
                         n_prior_included=1, 
                         n_prior_excluded=1, 
-                        n_instances=30, #number of instances to label per iteration
+                        n_instances=25, #number of instances to label per iteration
                         project=feature_project, 
                         stop_if=stopping_criterion, 
                         write_interval=write_interval,
@@ -181,6 +181,7 @@ for feature_extract in feature_extract_dct.keys():
                     start_time = timeit.default_timer()
                     reviewer_sim.review() #expted length of total_eval is 764
                     end_time = timeit.default_timer()
+                    sim_time = end_time - start_time
                     logger.info(f"Simulation finished in {end_time - start_time} seconds")
  
 

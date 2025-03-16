@@ -113,7 +113,7 @@ class FixedRecallCriterion(BaseStoppingCriterion):
 class StatisticalCriterion(BaseStoppingCriterion):
     """
     Stop when we have statistical confidence that we have achieved a certain recall %. 
-    We use buscarpy for this, which is based on the hypergeometric distribution. 
+    We use buscarpy for this. 
 
     Args: 
         recall_target : float
@@ -138,14 +138,10 @@ class StatisticalCriterion(BaseStoppingCriterion):
             True if we should stop, False otherwise.
     
         '''
-
-        #check for multilabel case 
         total_papers = state.n_records
         labelled = state.get_labeled()
-
         # evaluate null hypothesios and calculate pvalue, dont stop until pvalue is below target pval 
         current_pval = calculate_h0(N = total_papers, labels_ = labelled['label'], recall_target = self.recall_target, bias = self.bias)
-        print(f"Current p-value: {round(current_pval,3)}")
         return current_pval < self.pval_target
 
 

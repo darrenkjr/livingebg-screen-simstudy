@@ -1,12 +1,13 @@
 from asreview.review import ReviewSimulate
 import numpy as np 
 import pandas as pd 
-from sklearn.multioutput import MultiOutputClassifier
-
 from asreview.project import open_state
 from tqdm import tqdm
 from asreview.review.base import LABEL_NA
 from asreview.models.classifiers.multilabel_adapter import MultilabelClassifier
+from asreview.models.classifiers.sgd_wrapper import IncrementalClassifier
+import timeit
+
 class MultiLabelSimulate(ReviewSimulate):
     '''
     Wrapper for the ReviewSimulate class to simulate a multi-label classification 
@@ -51,7 +52,8 @@ class MultiLabelSimulate(ReviewSimulate):
         if self.multilabel_flag == True: 
             self.classifier = MultilabelClassifier(model, n_jobs=-1)
         else: 
-            self.classifier = model
+            self.classifier = IncrementalClassifier(model)
+
         super().__init__(
             as_data=as_data,
             model=self.classifier,
@@ -118,9 +120,14 @@ class MultiLabelSimulate(ReviewSimulate):
         )
 
        # While the stopping condition has not been met:
+       
         while not self._stop_review():
             # Train a new model.
+            start_time = timeit.default_timer()
             self.train()
+            end_time_train = timeit.default_timer()
+            train_time = end_time_train - start_time
+            print(f"Training time: {train_time} seconds")
 
             # Query for new records to label.
             record_ids = self._query(self.n_instances)
@@ -211,15 +218,17 @@ class MultiLabelSimulate(ReviewSimulate):
         )
         train_idx = np.where(y_sample_input != LABEL_NA)[0]
 
-        X_train, y_train, all_idx = self.balance_model.sample(self.X, y_sample_input, train_idx)
+        if self.training_set > 0: 
+            self._incremental_fit(self.X, y_sample_input, train_idx)
 
-        #grab y_train indices 
-        if self.multilabel_flag == True: 
-            y_train = self.label_matrix[all_idx]
+        else: 
+            X_train, y_train, all_idx = self.balance_model.sample(self.X, y_sample_input, train_idx)
 
-
-        # Fit the classifier on the trainings data.
-        self.classifier.fit(X_train, y_train)
+            #grab y_train indices 
+            if self.multilabel_flag == True: 
+                y_train = self.label_matrix[all_idx]
+            # Fit the classifier on the training data.
+            self.classifier.fit(X_train, y_train)
 
         # Use the query strategy to produce a ranking.
         ranked_record_ids, relevance_scores = self.query_strategy.query_multilabel(
@@ -235,6 +244,18 @@ class MultiLabelSimulate(ReviewSimulate):
         self.last_probabilities = relevance_scores[:, 1]
 
         self.training_set = new_training_set
+
+    def _incremental_fit(self, X, y, train_idx): 
+        """Fit the classifier on latest training data."""
+        new_idx = train_idx[~np.isin(train_idx, range(self.training_set))]
+        try: 
+            X_new, y_new, all_idx_new = self.balance_model.sample(X, y, new_idx)
+        except ZeroDivisionError: 
+            X_new, y_new = X[new_idx], y[new_idx]
+
+        self.classifier.partial_fit(X_new, y_new)
+
+
 
 
     def _label(self, record_ids, prior=False):
