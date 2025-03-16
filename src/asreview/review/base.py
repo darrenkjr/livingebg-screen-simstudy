@@ -291,13 +291,11 @@ class BaseReview(ABC):
                     "Not both labels available. " "Stopped training the model"
                 )
 
-        # TODO: Simplify balance model input.
-        # Use the balance model to sample the trainings data.
         y_sample_input = (
             pd.DataFrame(self.record_table)
             .merge(labeled, how="left", on="record_id")
             .loc[:, "label"]
-            .fillna(LABEL_NA)
+            .fillna(LABEL_NA) 
             .to_numpy()
         )
         train_idx = np.where(y_sample_input != LABEL_NA)[0]

@@ -113,7 +113,7 @@ class DoubleBalance(BaseBalance):
         self._random_state.shuffle(all_idx)
 
         # Return resampled feature matrix and labels.
-        return X[all_idx], y[all_idx]
+        return X[all_idx], y[all_idx], all_idx
 
     def full_hyper_space(self):
         from hyperopt import hp

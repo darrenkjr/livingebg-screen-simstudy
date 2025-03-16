@@ -272,6 +272,9 @@ class ReviewSimulate(BaseReview):
         if self.pool.empty:
             return True
             # Handle stopping criterion objects
+        elif  (self.data_labels[self.pool] == 1).sum() >= self.data_labels.sum(): 
+            return True
+
         elif isinstance(self.stop_if, BaseStoppingCriterion):
             with open_state(self.project, review_id=self.review_id) as state:
                 should_stop = self.stop_if(state)

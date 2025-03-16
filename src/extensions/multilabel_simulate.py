@@ -2,8 +2,11 @@ from asreview.review import ReviewSimulate
 import numpy as np 
 import pandas as pd 
 from sklearn.multioutput import MultiOutputClassifier
-from sklearn.base import clone
 
+from asreview.project import open_state
+from tqdm import tqdm
+from asreview.review.base import LABEL_NA
+from asreview.models.classifiers.multilabel_adapter import MultilabelClassifier
 class MultiLabelSimulate(ReviewSimulate):
     '''
     Wrapper for the ReviewSimulate class to simulate a multi-label classification 
@@ -29,12 +32,29 @@ class MultiLabelSimulate(ReviewSimulate):
         project=None,
         review_id=None,
         eval_total_relevant=None, 
-        eval_set=None
+        eval_set=None, 
+        multilabel_flag = False
     ): 
-        # Initialize parent class first
+                
+        # Store multilabel info
+        self.n_labels = n_labels
+        self.label_matrix = label_matrix
+        self.label_columns = label_columns
+        self.random_state = np.random.RandomState(init_seed)
+        self.eval_set = eval_set
+        self.multilabel_flag = multilabel_flag
+                # If we have a label matrix, use our custom prior selection
+        if self.label_matrix is not None and prior_indices is None:
+            self.selected_articles = set()
+            self.covered_topics = set()
+            prior_indices = self._prior_knowledge()
+        if self.multilabel_flag == True: 
+            self.classifier = MultilabelClassifier(model, n_jobs=-1)
+        else: 
+            self.classifier = model
         super().__init__(
             as_data=as_data,
-            model=model,
+            model=self.classifier,
             query_model=query_model,
             balance_model=balance_model,
             feature_model=feature_model,
@@ -49,17 +69,7 @@ class MultiLabelSimulate(ReviewSimulate):
             review_id=review_id,
             eval_set=eval_set
         )
-        
-        # Store multilabel info
-        self.n_labels = n_labels
-        self.label_matrix = label_matrix
-        self.label_columns = label_columns
-        self.random_state = np.random.RandomState(init_seed)
-        self.eval_set = eval_set
 
-        
-        # Create multilabel classifier by wrapping the base classifier
-        self.multilabel_classifier = MultiOutputClassifier(clone(model._model), n_jobs=-1)
         
         # Calculate total number of relevant records (unique across all topics)
         if label_matrix is not None:
@@ -77,17 +87,55 @@ class MultiLabelSimulate(ReviewSimulate):
 
     def _prior_knowledge(self):
         """Select one relevant article per topic"""
-        if not hasattr(self, 'label_matrix') or self.label_matrix is None:
-            # Fall back to parent implementation if no label matrix
-            return super()._prior_knowledge()
-        else: 
-            self.selected_articles = set()
-            self.covered_topics = set()
-            prior_included = self._select_prior_included()
-            prior_excluded = self._select_prior_excluded()
-            return np.concatenate((prior_included, prior_excluded))
-            
+
+        self.selected_articles = set()
+        self.covered_topics = set()
+        prior_included = self._select_prior_included()
+        prior_excluded = self._select_prior_excluded()
+        return np.concatenate((prior_included, prior_excluded))
+        
             #select irrelevant prior knowldege 
+    
+    def review(self):
+        """Override to handle multilabel data properly."""
+        with open_state(self.project, review_id=self.review_id, read_only=False) as s:
+            pending = s.get_pending()
+            if not pending.empty:
+                self._label(pending)
+
+            labels_prior = s.get_labels()
+
+        # progress bars
+        pbar_rel = tqdm(
+            initial=sum(labels_prior),
+            total=len(self.eval_set) if self.eval_set is not None else 764,
+            desc="Relevant records found",
+        )
+        pbar_total = tqdm(
+            initial=len(labels_prior),
+            total=len(self.as_data),
+            desc="Records labeled ",
+        )
+
+       # While the stopping condition has not been met:
+        while not self._stop_review():
+            # Train a new model.
+            self.train()
+
+            # Query for new records to label.
+            record_ids = self._query(self.n_instances)
+
+            # Label the records.
+            labels = self._label(record_ids)
+
+            # monitor progress here
+            pbar_rel.update(sum(labels))
+            pbar_total.update(len(labels))
+
+        else:
+            # write to state when stopped
+            pbar_rel.close()
+            pbar_total.close()
 
                 
     def _select_prior_included(self): 
@@ -101,10 +149,14 @@ class MultiLabelSimulate(ReviewSimulate):
             #select relevant articls first 
             if len(topic_relevant) > 0:
                 available = [_ for _ in topic_relevant if _ not in self.selected_articles]
-                chosen_included = self.random_state.choice(available)
-                prior_included.append(chosen_included)
-                self.selected_articles.add(chosen_included)
-                self.covered_topics.add(topic_idx)
+                if available:  # Check if available is not empty
+                    chosen_included = self.random_state.choice(available)
+                    prior_included.append(chosen_included)
+                    self.selected_articles.add(chosen_included)
+                    self.covered_topics.add(topic_idx)
+                else:
+                    print(f"Warning: All relevant records for topic {topic_idx} have already been selected")
+                    self.covered_topics.add(topic_idx)
             else: 
                 print(f"Warning: No relevant records for topic {topic_idx}")
                 self.covered_topics.add(topic_idx)
@@ -119,9 +171,13 @@ class MultiLabelSimulate(ReviewSimulate):
             topic_irrelevant = np.where(self.label_matrix[:, topic_idx] == 0)[0]
             if len(topic_irrelevant) > 0: 
                 available = [_ for _ in topic_irrelevant if _ not in self.selected_articles]
-                chosen_excluded = self.random_state.choice(available)
-                prior_excluded.append(chosen_excluded)
-                self.selected_articles.add(chosen_excluded)
+                if available:  # Check if available is not empty
+                    chosen_excluded = self.random_state.choice(available)
+                    prior_excluded.append(chosen_excluded)
+                    self.selected_articles.add(chosen_excluded)
+                else:
+                    print(f"Warning: All irrelevant records for topic {topic_idx} have already been selected")
+                    self.covered_topics.add(topic_idx)
         return prior_excluded
 
     
@@ -139,46 +195,47 @@ class MultiLabelSimulate(ReviewSimulate):
             # Extract multilabel matrix for labeled records
             y_multilabel = self.label_matrix[labeled_indices]
             return X, y_multilabel
+        
 
-    
-    def _train_model(self):
-        """Train both the binary classifier and multilabel classifier."""
-        
-        # Now train the multilabel classifier if we have multilabel data
-        if hasattr(self, 'label_matrix') and self.label_matrix is not None:
-            # Get feature matrix and multilabel matrix for labeled records
-            X, y_multilabel = self._get_labeled_matrices()
-            
-            # Train multilabel classifier if we have enough labeled records
-            if len(X) > 0 and np.any(y_multilabel.sum(axis=0) > 0):
-                try:
-                    self.multilabel_classifier.fit(X, y_multilabel)
-                except Exception as e:
-                    print(f"Error training multilabel classifier: {e}")
-    
-    def _get_proba(self, pool_indices):
-        """Get relevance probabilities incorporating multilabel information."""
-        # Get features for unlabeled records
-        X_pool = self.X[pool_indices]
-        # First get standard binary probabilities (parent implementation)
-        binary_proba = self.classifier.predict_proba(X_pool)[:, 1]
-        
-        # If we have a trained multilabel classifier, use it to enhance probabilities
-        if hasattr(self, 'multilabel_classifier') and hasattr(self.multilabel_classifier, 'estimators_'):
-            try:
-                # Get multilabel probabilities
-                multilabel_proba = np.array([
-                    est.predict_proba(X_pool)[:, 1] if est is not None else np.zeros(len(X_pool))
-                    for est in self.multilabel_classifier.estimators_
-                ]).T
-                
-                # Use maximum probability across all topics
-                max_proba = np.max(multilabel_proba, axis=1)
-                
-                # Return the multilabel probability
-                return max_proba
-            except: 
-                raise 
+    def train(self):
+        """Train a new model on the labeled data."""
+        # Check if both labels are available.
+        new_training_set = len(self.labeled)
+
+        y_sample_input = (
+            pd.DataFrame(self.record_table)
+            .merge(self.labeled, how="left", on="record_id")
+            .loc[:, "label"]
+            .fillna(LABEL_NA) 
+            .to_numpy()
+        )
+        train_idx = np.where(y_sample_input != LABEL_NA)[0]
+
+        X_train, y_train, all_idx = self.balance_model.sample(self.X, y_sample_input, train_idx)
+
+        #grab y_train indices 
+        if self.multilabel_flag == True: 
+            y_train = self.label_matrix[all_idx]
+
+
+        # Fit the classifier on the trainings data.
+        self.classifier.fit(X_train, y_train)
+
+        # Use the query strategy to produce a ranking.
+        ranked_record_ids, relevance_scores = self.query_strategy.query_multilabel(
+            self.X, classifier=self.classifier, return_classifier_scores=True
+        )
+
+        self.last_ranking = pd.concat(
+            [pd.Series(ranked_record_ids), pd.Series(range(len(ranked_record_ids)))],
+            axis=1,
+        )
+        self.last_ranking.columns = ["record_id", "label"]
+        # The scores for the included records in the second column.
+        self.last_probabilities = relevance_scores[:, 1]
+
+        self.training_set = new_training_set
+
 
     def _label(self, record_ids, prior=False):
         # Call parent method to handle standard labeling

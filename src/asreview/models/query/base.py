@@ -17,6 +17,7 @@ __all__ = ["BaseQueryStrategy", "ProbaQueryStrategy"]
 from abc import abstractmethod
 
 from asreview.models.base import BaseModel
+import numpy as np
 
 
 class BaseQueryStrategy(BaseModel):
@@ -76,6 +77,27 @@ class ProbaQueryStrategy(BaseQueryStrategy):
 
         query_idx = self._query(predictions, n_instances, X)
 
+        if return_classifier_scores:
+            return query_idx, predictions
+        else:
+            return query_idx
+        
+    def query_multilabel(
+        self, X, classifier, n_instances=None, return_classifier_scores=False, **kwargs
+    ):
+        """Query method for strategies which use class probabilities (multilabel)."""
+
+        try:
+            
+            multilabel_proba = np.array([
+            est.predict_proba(X)[:, 1] if est is not None else np.zeros(len(X)) for est in classifier.estimators_]).T
+            max_proba = np.max(multilabel_proba, axis=1)
+            predictions = np.column_stack((1 - max_proba, max_proba))
+        except AttributeError: 
+            #grab binary proba 
+            return self.query(X, classifier, n_instances, return_classifier_scores, **kwargs)
+        
+        query_idx = self._query(predictions, n_instances, X)
         if return_classifier_scores:
             return query_idx, predictions
         else:

@@ -17,11 +17,14 @@ seaborn = ">=0.13.2,<0.14"
 transformers = "==4.47.1"
 kiwisolver = ">=1.4.7,<2"
 matplotlib = ">=3.10.1,<4"
+gensim = ">=4.3.2,<5"
+scipy = "<1.13"
 
 [pypi-dependencies]
 asreview = ">=1.6.5, <2"
 buscarpy = ">=0.0.2, <0.0.3"
 adapters = ">=1.1.0, <2"
+sentence-transformers = ">=3.4.1, <4"
 
 [environments]
 cpu = ["cpu"]

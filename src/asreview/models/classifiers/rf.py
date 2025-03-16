@@ -45,19 +45,22 @@ class RandomForestClassifier(BaseTrainClassifier):
     label = "Random forest"
 
     def __init__(
-        self, n_estimators=100, max_features=10, class_weight=1.0, random_state=None
+        self, n_estimators=100, max_features=10, class_weight=1.0, random_state=None, n_jobs=1
     ):
         super(RandomForestClassifier, self).__init__()
         self.n_estimators = int(n_estimators)
         self.max_features = int(max_features)
         self.class_weight = class_weight
         self._random_state = random_state
+        self.n_jobs = n_jobs
 
         self._model = SKRandomForestClassifier(
             n_estimators=self.n_estimators,
             max_features=self.max_features,
             class_weight=_set_class_weight(class_weight),
             random_state=random_state,
+            n_jobs=self.n_jobs
+
         )
 
     def full_hyper_space(self):

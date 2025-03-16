@@ -58,15 +58,14 @@ multilabel_df.to_csv(dataset_path, index=False)
 
 
 # Define models to test 
-classifier_interest = ['lr']
-feature_extract_interest = ['specter2', 'biolinkbert', 'doc2vec', 'sbert']
-stopcriterion_interest = [None, 'statistical'] #took out time and consecutive irrelevant can look at this retrospectively
 
-classifer_dct = {
-    'lr': LogisticClassifier(n_jobs=-1),
-    'rf': RandomForestClassifier(n_jobs=-1),
-    'svm': SVMClassifier(),
-    'nb': NaiveBayesClassifier()
+ #took out time and consecutive irrelevant can look at this retrospectively
+
+classifier_dct = {
+    'binary_lr': LogisticClassifier(),
+    'binary_rf': RandomForestClassifier(),
+    'binary_svm': SVMClassifier(),
+    'binary_nb': NaiveBayesClassifier()
 }
 
 feature_extract_dct = {
@@ -84,8 +83,8 @@ balance_model = DoubleBalance()
 
 # Store simulation metadata
 simconfig_list = []
-
-for feature_extract in feature_extract_interest:
+stopcriterion_interest = [None, 'statistical']
+for feature_extract in feature_extract_dct.keys():
     logger.info(f"Starting simulations with feature extraction: {feature_extract}")
     
     # Create one project per feature extraction method
@@ -118,12 +117,12 @@ for feature_extract in feature_extract_interest:
     feature_model = feature_extract_dct[feature_extract]
     
     # Now run all classifiers with this feature extraction
-    for classifier in classifier_interest:
+    for classifier in classifier_dct.keys():
         for stopcriterion in stopcriterion_interest:
             logger.info(f"Running simulation with classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}")
             
             # Get models
-            train_model = classifer_dct[classifier]
+            train_model = classifier_dct[classifier]
             
             # Get stopping criterion
             if stopcriterion == 'fixedrecall_benchmark': 
