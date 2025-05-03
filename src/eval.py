@@ -41,25 +41,29 @@ class eval:
 
         _dct = {} 
         for file in self.result_dir.glob('*.json'):
-            uid = json.load(open(file))['simreview_id']
-            feature = json.load(open(file))['feature_extraction']
-            classifier = json.load(open(file))['classifier']
-            stop_criterion = json.load(open(file))['stop_criterion']
-            stop_params = json.load(open(file))['stop_params']
-            if stop_criterion == 'statistical': 
-                stop_params = self.parse_np_tuple(stop_params)
-            result_sql_path = self.result_dir / f'feature_{feature}' / 'reviews' / f'{uid}' / 'results.sql'
-            dataset_path = self.result_dir / f'feature_{feature}' / 'data' / 'dataset.csv'
-            _dct[uid] = {
-                'feature': feature,
-                'classifier': classifier,
-                'stop_criterion': stop_criterion,
-                'stop_params': stop_params,
-                'result_sql_path': result_sql_path,
-                'dataset_path': dataset_path, 
-            }
+            try:
+                uid = json.load(open(file))['simreview_id']
+                feature = json.load(open(file))['feature_extraction']
+                classifier = json.load(open(file))['classifier']
+                stop_criterion = json.load(open(file))['stop_criterion']
+                stop_params = json.load(open(file))['stop_params']
+                if stop_criterion == 'statistical': 
+                    stop_params = self.parse_np_tuple(stop_params)
+                result_sql_path = self.result_dir / f'feature_{feature}' / 'reviews' / f'{uid}' / 'results.sql'
+                dataset_path = self.result_dir / f'feature_{feature}' / 'data' / 'dataset.csv'
+                _dct[uid] = {
+                    'feature': feature,
+                    'classifier': classifier,
+                    'stop_criterion': stop_criterion,
+                    'stop_params': stop_params,
+                    'result_sql_path': result_sql_path,
+                    'dataset_path': dataset_path, 
+                }
 
-        self.result_metadata_df = pd.DataFrame.from_dict(_dct, orient='index').reset_index().rename(columns={'index': 'uid'})
+                self.result_metadata_df = pd.DataFrame.from_dict(_dct, orient='index').reset_index().rename(columns={'index': 'uid'})
+            except: 
+                pass 
+    
 
 
     def parse_sql_results(self,sql_path : str, dataset_path : str):
@@ -69,14 +73,17 @@ class eval:
         Returns: 
             metrics object 
         '''
-        conn = sqlite3.connect(sql_path)
-        #grab everything from rsults 
-        results = pd.read_sql_query("SELECT * FROM results", conn)
-        #set up column template when simulating time and data driven cases 
-        self.col_template = results.columns.tolist()
-        evalset = pd.read_csv(self.eval_set_path)
-        adjusted_evalset = pd.read_csv(dataset_path)
-        return self.calc_metrics(evalset, adjusted_evalset, results)
+        try: 
+            conn = sqlite3.connect(sql_path)
+            #grab everything from rsults 
+            results = pd.read_sql_query("SELECT * FROM results", conn)
+            #set up column template when simulating time and data driven cases 
+            self.col_template = results.columns.tolist()
+            evalset = pd.read_csv(self.eval_set_path)
+            adjusted_evalset = pd.read_csv(dataset_path)
+            return self.calc_metrics(evalset, adjusted_evalset, results)
+        except: 
+            pass
 
 
     def calc_metrics(self, evalset, adjusted_evalset, results): 
@@ -195,19 +202,26 @@ class eval:
         return result_df
 
     def run_eval(self): 
+        
         for idx, row in self.result_metadata_df.iterrows():
-            print(f'Running eval for {row["uid"]}')
-            metrics_dct = asdict(self.parse_sql_results(row['result_sql_path'], row['dataset_path']))
-            self.result_metadata_df.loc[idx, metrics_dct.keys()] = pd.Series(metrics_dct)
+            try: 
+                print(f'Running eval for {row["uid"]}')
+                metrics_dct = asdict(self.parse_sql_results(row['result_sql_path'], row['dataset_path']))
+                self.result_metadata_df.loc[idx, metrics_dct.keys()] = pd.Series(metrics_dct)
+            except: 
+                pass 
         
         #run time driven eval 
         baseline_result_metadata = self.result_metadata_df[pd.isna(self.result_metadata_df['stop_criterion'])]
         print('Running time and data driven simulations and eval')
         for idx, row in baseline_result_metadata.iterrows():
-            metadata = baseline_result_metadata[['feature', 'classifier', 'result_sql_path', 'dataset_path']]
-            result_metadata_timedriven = self.simulate_timedriven_stop(row['result_sql_path'], metadata, row['dataset_path'])
-            result_metadata_datadriven = self.simulate_data_driven_stop(row['result_sql_path'], metadata, row['dataset_path'])
-            self.result_metadata_df = pd.concat([self.result_metadata_df, result_metadata_timedriven, result_metadata_datadriven])
+            try: 
+                metadata = baseline_result_metadata[['feature', 'classifier', 'result_sql_path', 'dataset_path']]
+                result_metadata_timedriven = self.simulate_timedriven_stop(row['result_sql_path'], metadata, row['dataset_path'])
+                result_metadata_datadriven = self.simulate_data_driven_stop(row['result_sql_path'], metadata, row['dataset_path'])
+                self.result_metadata_df = pd.concat([self.result_metadata_df, result_metadata_timedriven, result_metadata_datadriven])
+            except: 
+                pass 
         
         print('Eval complete')
         return self.result_metadata_df
