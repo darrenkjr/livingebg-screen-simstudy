@@ -4,7 +4,6 @@ import pandas as pd
 from asreview.project import open_state
 from tqdm import tqdm
 from asreview.review.base import LABEL_NA
-from asreview.models.classifiers.multilabel_adapter import MultilabelClassifier
 from asreview.models.classifiers.sgd_wrapper import IncrementalClassifier
 import timeit
 
@@ -54,8 +53,8 @@ class ExtendedSimulate(ReviewSimulate):
             self.selected_articles = set()
             self.covered_topics = set()
             prior_indices = self._prior_knowledge()
-        if self.multilabel_flag == True: 
-            self.classifier = MultilabelClassifier(model, n_jobs=-1)
+        # if self.multilabel_flag == True: 
+        #     self.classifier = MultilabelClassifier(model, n_jobs=-1)
         elif self.sgd_flag == True: 
             self.classifier = IncrementalClassifier(model)
         else: 

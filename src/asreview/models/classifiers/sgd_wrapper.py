@@ -23,12 +23,9 @@ class IncrementalClassifier(BaseTrainClassifier):
         self._model = SGDClassifier(
             loss=self.sgd_dict[base_model.name],
             warm_start=True, 
+            n_jobs=-1
         )
 
-        # self.calibrated_model = CalibratedClassifierCV(
-        #     base_estimator=self._model,
-        #     method='sigmoid',
-        # ) #dont use this for now 
 
         
     def fit(self, X, y):
