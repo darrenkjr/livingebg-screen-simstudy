@@ -55,7 +55,7 @@ class ExtendedSimulate(ReviewSimulate):
             prior_indices = self._prior_knowledge()
         # if self.multilabel_flag == True: 
         #     self.classifier = MultilabelClassifier(model, n_jobs=-1)
-        elif self.sgd_flag == True: 
+        if self.sgd_flag == True: 
             self.classifier = IncrementalClassifier(model)
         else: 
             self.classifier = model

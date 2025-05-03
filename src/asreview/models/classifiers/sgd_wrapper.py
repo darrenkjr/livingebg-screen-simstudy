@@ -20,30 +20,49 @@ class IncrementalClassifier(BaseTrainClassifier):
         self.label = f"sgd_{base_model.label}"
         
         # Create multilabel classifier with the inner sklearn model
-        self._model = SGDClassifier(
+        self.sgd_model = SGDClassifier(
             loss=self.sgd_dict[base_model.name],
             warm_start=True, 
-            n_jobs=-1
         )
+
+        self.is_calibrated = False
+
+        self._model = CalibratedClassifierCV(
+            self.sgd_model, 
+            method = 'sigmoid', 
+            cv = 'prefit'
+        )
+        
 
 
         
     def fit(self, X, y):
         """Fit the sgd wrapped model."""
-        return self._model.fit(X, y)
+        self.sgd_model.fit(X, y)
+        self._model.fit(X,y)
+        self.is_calibrated = True
+        return self
     
     def partial_fit(self, X, y): 
         """Partial fit the sgd wrapped model."""
         classes = np.array([0,1])
-        return self._model.partial_fit(X, y, classes=classes)
+        self.sgd_model.partial_fit(X, y, classes=classes)
+        if len(np.unique(y))>1: 
+            self._model.fit(X, y)
+            self.is_calibrated = True
+        else: 
+            self.is_calibrated = False 
+
+        return self
     
     def predict_proba(self, X):
-        """Predict the probabilities of the sgd wrapped model."""
-        if hasattr(self._model, 'predict_proba'):
+        """Get calibrated probabilities when possible, fallback to sigmoid otherwise."""
+        if self.is_calibrated:
+            # Use the calibrated model for predictions if possible 
             return self._model.predict_proba(X)
-        else: 
-            scores =  self._model.decision_function(X)
-            #convert using sigmoid 
+        else:
+            # Fallback to sigmoid calibration if no calibration is available
+            scores = self.sgd_model.decision_function(X)
             proba = 1.0 / (1.0 + np.exp(-scores))
             return np.column_stack((1-proba, proba))
 
