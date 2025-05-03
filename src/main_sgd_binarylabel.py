@@ -57,11 +57,10 @@ multilabel_df.to_csv(dataset_path, index=False)
  #took out time and consecutive irrelevant can look at this retrospectively
 
 classifier_dct = {
-    'sgd_svm': SVMClassifier(),
-    # 'sgd_logistic': LogisticClassifier(),
-    # 'binary_rf': RandomForestClassifier(),
-   
-    # 'binary_nb': NaiveBayesClassifier()
+    'sgd_incremental_svm': SVMClassifier(),
+    'sgd_incremental_logistic': LogisticClassifier(),
+    'pool_svm': SVMClassifier(),
+    'pool_logistic': LogisticClassifier(),
 }
 
 feature_extract_dct = {
@@ -79,7 +78,7 @@ balance_model = DoubleBalance()
 
 # Store simulation metadata
 simconfig_list = []
-stopcriterion_interest = ['time']
+stopcriterion_interest = ['statistical','time', 'consecutive_irrelevant']
 for feature_extract in feature_extract_dct.keys():
     print(f"Starting simulations with feature extraction: {feature_extract}")
     
@@ -116,7 +115,10 @@ for feature_extract in feature_extract_dct.keys():
     for classifier in classifier_dct.keys():
         for stopcriterion in stopcriterion_interest:
             print(f"Running simulation with classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}")
-            
+            if classifier.startswith('sgd'): 
+                sgd_flag = True
+            elif classifier.startswith('pool'): 
+                sgd_flag = False
             # Get models
             train_model = classifier_dct[classifier]
             
@@ -172,7 +174,7 @@ for feature_extract in feature_extract_dct.keys():
                         eval_set=eval_data_unique,
                         review_id=simreview_id, 
                         logger=timing_metric_logger, 
-                        sgd_flag = True
+                        sgd_flag = sgd_flag
                     )
 
                     
@@ -200,7 +202,7 @@ for feature_extract in feature_extract_dct.keys():
                     }
 
 
-                    with open(resultdir / f"simulation_metadata_{simreview_id}.json", 'w') as f:
+                    with open(resultdir / 'results' / f'feature_{feature_extract}'/f"simulation_metadata_{simreview_id}.json", 'w') as f:
                         json.dump(simulation_metadata, f, indent=2)
                     print(f'Simulation finisehd for id: {simreview_id}, recall: {reviewer_sim.global_recall}, classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}, params: {params}')
                     
