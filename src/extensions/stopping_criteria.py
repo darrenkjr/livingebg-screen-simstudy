@@ -41,7 +41,6 @@ class TimeBasedCriterion(BaseStoppingCriterion):
         total_papers = state.n_records
         reviewed_papers = len(state.get_labeled())
         total_reviewed = reviewed_papers / total_papers
-        print(f'Total papers: {total_papers}, Reviewed papers: {reviewed_papers}')
         should_stop = reviewed_papers >= self.percentage * total_papers
         iteration = kwargs.get('iteration', None)
         labeled_count = kwargs.get('labeled_count', None)

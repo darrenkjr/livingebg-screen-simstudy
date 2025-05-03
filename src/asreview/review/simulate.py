@@ -279,14 +279,13 @@ class ReviewSimulate(BaseReview):
             return True
             # Handle stopping criterion objects
 
-        #stop when all remaining  is irrelevant
-        elif (self.data_labels[self.pool] == 0).all(): 
-            return True
+        # #stop when all remaining  is irrelevant
+        # elif (self.data_labels[self.pool] == 0).all(): 
+        #     return True
 
 
         elif isinstance(self.stop_if, BaseStoppingCriterion):
             with open_state(self.project, review_id=self.review_id) as state:
-                print('Checking stopping criterion')
                 start_time = timeit.default_timer()
                 should_stop = self.stop_if(state, iteration=iteration, labeled_count = labeled_count, logger=self.logger)
                 end_time = timeit.default_timer()

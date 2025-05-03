@@ -48,6 +48,7 @@ class ExtendedSimulate(ReviewSimulate):
         self.multilabel_flag = multilabel_flag
         self.sgd_flag = sgd_flag
         self.logger = logger
+        self.trained_record_ids = set()
                 # If we have a label matrix, use our custom prior selection
         if self.label_matrix is not None and prior_indices is None:
             self.selected_articles = set()
@@ -129,23 +130,20 @@ class ExtendedSimulate(ReviewSimulate):
        # While the stopping condition has not been met:
         iteration = 1 
         while not self._stop_review(iteration = iteration, labeled_count = len(self.labeled), logger = self.logger):
-            # Train a new model.
-            print('Training classifier')
+
+
             start_time = timeit.default_timer()
             self.train()
             end_time_train = timeit.default_timer()
             train_time = end_time_train - start_time
-            
 
             # Query for new records to label.
-            print('Querying new records')
             start_time_query = timeit.default_timer()
             record_ids = self._query(self.n_instances)
             end_time_query = timeit.default_timer()
             query_time = end_time_query - start_time_query
 
             # Label the records.
-            print('Labelling')
             start_time_label = timeit.default_timer()
             labels = self._label(record_ids)
             end_time_label = timeit.default_timer()
@@ -155,8 +153,7 @@ class ExtendedSimulate(ReviewSimulate):
             pbar_rel.update(sum(labels))
             pbar_total.update(len(labels))
             end_time_total = timeit.default_timer() - start_time
-            print(f'Iteration finished: {iteration}, total elapsed time for this iteration: {end_time_total}')
-            self.logger.log_iteration_timings(iteration=iteration, train_time=train_time, query_time=query_time, label_time=label_time, total_iteration_time = end_time_total, labeled_count = len(self.labeled))
+            self.logger.log_iteration_timings(iteration=iteration, train_predict_time=train_time, query_reranking_time=query_time, label_time=label_time, total_iteration_time = end_time_total, labeled_count = len(self.labeled))
 
             iteration +=1 
             
@@ -228,7 +225,7 @@ class ExtendedSimulate(ReviewSimulate):
     def train(self):
         """Train a new model on the labeled data."""
         # Check if both labels are available.
-        new_training_set = len(self.labeled)
+        current_labeled_ids = set(self.labeled['record_id'])
 
         y_sample_input = (
             pd.DataFrame(self.record_table)
@@ -239,10 +236,15 @@ class ExtendedSimulate(ReviewSimulate):
         )
         train_idx = np.where(y_sample_input != LABEL_NA)[0]
 
-        if self.training_set > 0 and self.sgd_flag == True: 
-            self._incremental_fit(self.X, y_sample_input, train_idx)
+        if self.sgd_flag == True: 
+            #fit on new data 
+            new_record_ids = current_labeled_ids - self.trained_record_ids
+            if new_record_ids:
+                self._incremental_fit(self.X, y_sample_input, train_idx, new_record_ids)
+
 
         else: 
+            #fit on *all* data
             X_train, y_train, all_idx = self.balance_model.sample(self.X, y_sample_input, train_idx)
             #grab y_train indices for multiabel case 
             if self.multilabel_flag == True: 
@@ -250,6 +252,7 @@ class ExtendedSimulate(ReviewSimulate):
             # Fit the classifier on the training data.
             self.classifier.fit(X_train, y_train)
 
+        self.trained_record_ids = current_labeled_ids
         # Use the query strategy to produce a ranking.
         ranked_record_ids, relevance_scores = self.query_strategy.query_multilabel(
             self.X, classifier=self.classifier, return_classifier_scores=True
@@ -263,20 +266,24 @@ class ExtendedSimulate(ReviewSimulate):
         # The scores for the included records in the second column.
         self.last_probabilities = relevance_scores[:, 1]
 
-        self.training_set = new_training_set
+        self.training_set = len(current_labeled_ids)
 
-    def _incremental_fit(self, X, y, train_idx): 
+    def _incremental_fit(self, X, y, train_idx, new_record_ids):
         """Fit the classifier on latest training data."""
-        new_idx = train_idx[~np.isin(train_idx, range(self.training_set))]
-        try: 
+        # Get indices for the new records
+        record_ids = pd.DataFrame(self.record_table)['record_id'].values
+        new_idx = [i for i in train_idx if record_ids[i] in new_record_ids]
+        new_idx = np.array(new_idx) 
+        try:
             X_new, y_new, all_idx_new = self.balance_model.sample(X, y, new_idx)
-        except ZeroDivisionError: 
+        except ZeroDivisionError:
+            #fall back if the new sampling dataset has either only all irrelvant or only all relevant - this is the same as th simple sampling strategy
             X_new, y_new = X[new_idx], y[new_idx]
-
+        
         self.classifier.partial_fit(X_new, y_new)
-
-
-
+        
+        # Update the trained records after incremental training
+        self.trained_record_ids.update(new_record_ids)
 
     def _label(self, record_ids, prior=False):
         # Call parent method to handle standard labeling
