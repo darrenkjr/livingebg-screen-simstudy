@@ -6,17 +6,17 @@ import pandas as pd
 
 class BaseStoppingCriterion(ABC):
     """Base class for all stopping criteria"""
-    def __init__(self, name: str):
+    def __init__(self, name: str, **kwargs):
         self.name = name
         self._stopped = False
         self._stopped_at = None
         
     @abstractmethod
-    def should_stop(self, state) -> bool:
+    def should_stop(self, state, **kwargs) -> bool:
         pass
     
-    def __call__(self, state) -> bool:
-        should_stop = self.should_stop(state)
+    def __call__(self, state, **kwargs) -> bool:
+        should_stop = self.should_stop(state, **kwargs)
         if should_stop and not self._stopped:
             self._stopped = True
         return should_stop
@@ -36,11 +36,17 @@ class TimeBasedCriterion(BaseStoppingCriterion):
         self.percentage = percentage
         self.name = f"time_based_{percentage}"
         
-    def should_stop(self, state) -> bool:
+    def should_stop(self, state, **kwargs) -> bool:
+        self.logger = kwargs.get('logger', None)
         total_papers = state.n_records
         reviewed_papers = len(state.get_labeled())
+        total_reviewed = reviewed_papers / total_papers
         print(f'Total papers: {total_papers}, Reviewed papers: {reviewed_papers}')
-        return reviewed_papers >= self.percentage * total_papers
+        should_stop = reviewed_papers >= self.percentage * total_papers
+        iteration = kwargs.get('iteration', None)
+        labeled_count = kwargs.get('labeled_count', None)
+        self.logger.log_iteration_timings(iteration=iteration, labeled_count = labeled_count, total_reviewed = total_reviewed)
+        return should_stop
 
 class ConsecutiveIrrelevantCriterion(BaseStoppingCriterion):
     """Stop after finding a percentage of consecutive irrelevant abstracts aka data driven strategy"""
@@ -58,8 +64,8 @@ class ConsecutiveIrrelevantCriterion(BaseStoppingCriterion):
         self.name = f"consecutive_irrelevant_{percentage}"
         self._last_checked_index = 0 
         
-    def should_stop(self, state) -> bool:
-
+    def should_stop(self, state, **kwargs) -> bool:
+        self.logger = kwargs.get('logger', None)
         labelled = state.get_labeled()
         total_papers = state.n_records
         window_size = int(self.percentage * total_papers)
@@ -74,41 +80,15 @@ class ConsecutiveIrrelevantCriterion(BaseStoppingCriterion):
         #retrieve label columns 
         self._last_checked_index = len(labelled)
 
-        # If we have enough new labels to fill a window
         if len(new_labels) >= window_size:
             recent_window = new_labels.tail(window_size)
-            return (recent_window == 0).all()  # True if all irrelevant
-        else:   
-            return False
+            should_stop = (recent_window == 0).all()
+            iteration = kwargs.get('iteration', None)
+            labeled_count = kwargs.get('labeled_count', None)
+            self.logger.log_iteration_timings(iteration=iteration, labeled_count = labeled_count, consecutive_irrelevant_window = len(recent_window))
+            return should_stop  # True if all irrelevant
 
 
-
-class FixedRecallCriterion(BaseStoppingCriterion): 
-    """Stop when 95% of all relevant records have been identified"""
-    def __init__(self, label_matrix, target_recall=0.95, eval_set = None):
-        super().__init__(f"fixed_recall_{target_recall}")
-        self.label_matrix = label_matrix
-        self.target_recall = target_recall
-        # Calculate total relevant records
-        self.total_relevant = len(eval_set)
-        self.found_relevant = set()
-        
-    def should_stop(self, state) -> bool:
-        # Get recently labeled records
-        labeled = state.get_labeled()
-        
-        # Update found relevant records
-        for idx, row in labeled.iterrows():
-            record_id = row['record_id']
-            if record_id not in self.found_relevant and row['label'] == 1:
-                self.found_relevant.add(record_id)
-        
-        # Calculate current recall
-        current_recall = len(self.found_relevant) / self.total_relevant
-        assert current_recall <= 1 
-        
-        return current_recall >= self.target_recall
-    
 
 class StatisticalCriterion(BaseStoppingCriterion):
     """
@@ -130,7 +110,7 @@ class StatisticalCriterion(BaseStoppingCriterion):
         self.name = f"statistical_{recall_target}_{pval_target}"
         self.bias = bias
 
-    def should_stop(self, state) -> bool:
+    def should_stop(self, state, **kwargs) -> bool:
         '''
         Calcualte the pval of the current state and check if it is below target pval. If it is, stop.
 
@@ -138,10 +118,15 @@ class StatisticalCriterion(BaseStoppingCriterion):
             True if we should stop, False otherwise.
     
         '''
+        self.logger = kwargs.get('logger', None)
         total_papers = state.n_records
         labelled = state.get_labeled()
         # evaluate null hypothesios and calculate pvalue, dont stop until pvalue is below target pval 
         current_pval = calculate_h0(N = total_papers, labels_ = labelled['label'], recall_target = self.recall_target, bias = self.bias)
+        #log p-val 
+        iteration = kwargs.get('iteration', None)
+        labeled_count = kwargs.get('labeled_count', None)
+        self.logger.log_iteration_timings(iteration=iteration, labeled_count = labeled_count, pval = current_pval)
         return current_pval < self.pval_target
 
 
@@ -180,12 +165,6 @@ def CreateSimulationStoppingCriterion(criterion_type: str, **kwargs):
         bias_steps = np.arange(starting_bias, bias_limit+1, starting_bias_step)
         for bias in bias_steps: 
             yield StatisticalCriterion(recall_target, pval_target, bias), (recall_target, pval_target, bias)
-
-    elif criterion_type == "fixedrecall_benchmark": 
-        label_matrix = kwargs.get('label_matrix')
-        recall_target = kwargs.get('recall_target')
-        eval_set = kwargs.get('eval_set')
-        yield FixedRecallCriterion(label_matrix, recall_target, eval_set), recall_target
     
     else: 
         yield None, None

@@ -156,6 +156,7 @@ class ReviewSimulate(BaseReview):
         prior_indices=None,
         init_seed=None,
         write_interval=None,
+        logger=None,
         **kwargs,
     ):
         self.n_prior_included = n_prior_included
@@ -163,6 +164,7 @@ class ReviewSimulate(BaseReview):
         self.review_id = kwargs.get('review_id', None)
         self.eval_set = kwargs.get('eval_set', None)
         self.write_interval = write_interval
+        self.logger = logger
 
         # check for partly labeled data
         labels = as_data.labels
@@ -186,7 +188,7 @@ class ReviewSimulate(BaseReview):
                 start_idx = naive_prior_knowledge(labels)
 
         super(ReviewSimulate, self).__init__(
-            as_data, *args, start_idx=start_idx, **kwargs
+            as_data, *args, start_idx=start_idx, logger=self.logger, **kwargs
         )
 
         # Setup the reviewer attributes that take over the role of state
@@ -265,32 +267,36 @@ class ReviewSimulate(BaseReview):
         super().review()
         self._write_to_state()
 
-    def _stop_review(self):
+    def _stop_review(self, logger = None, **kwargs):
         """In simulation mode, the stop review function should get the labeled
         records list from the reviewer attribute."""
+        self.logger = logger
 
+        iteration = kwargs.get('iteration', None)
+        labeled_count = kwargs.get('labeled_count', None)
         # if the pool is empty, always stop
         if self.pool.empty:
             return True
             # Handle stopping criterion objects
 
+        #stop when all remaining  is irrelevant
+        elif (self.data_labels[self.pool] == 0).all(): 
+            return True
+
 
         elif isinstance(self.stop_if, BaseStoppingCriterion):
-            start_time = timeit.default_timer()
             with open_state(self.project, review_id=self.review_id) as state:
-                should_stop = self.stop_if(state)
+                print('Checking stopping criterion')
+                start_time = timeit.default_timer()
+                should_stop = self.stop_if(state, iteration=iteration, labeled_count = labeled_count, logger=self.logger)
                 end_time = timeit.default_timer()
-                print(f"Stopping criterion checking time: {end_time - start_time} seconds")
+                stopcriterion_checktime = end_time - start_time
+                self.logger.log_iteration_timings(iteration=iteration, labeled_count = labeled_count, stopcriterion_checktime=stopcriterion_checktime)
                 return should_stop
 
-        # If stop_if is set to min, stop when all papers in the pool are
-        # irrelevant.
-        elif self.stop_if == "min" and (self.data_labels[self.pool] == 0).all():
-            return True
-
-        # Stop when reaching stop_if (if provided)
-        elif isinstance(self.stop_if, int) and self.total_queries >= self.stop_if:
-            return True
+        # # Stop when reaching stop_if (if provided)
+        # elif isinstance(self.stop_if, int) and self.total_queries >= self.stop_if:
+        #     return True
 
         return False
 

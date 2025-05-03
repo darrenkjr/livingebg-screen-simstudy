@@ -8,7 +8,7 @@ from asreview.models.classifiers.multilabel_adapter import MultilabelClassifier
 from asreview.models.classifiers.sgd_wrapper import IncrementalClassifier
 import timeit
 
-class MultiLabelSimulate(ReviewSimulate):
+class ExtendedSimulate(ReviewSimulate):
     '''
     Wrapper for the ReviewSimulate class to simulate a multi-label classification 
     '''
@@ -34,7 +34,9 @@ class MultiLabelSimulate(ReviewSimulate):
         review_id=None,
         eval_total_relevant=None, 
         eval_set=None, 
-        multilabel_flag = False
+        multilabel_flag = False, 
+        sgd_flag = False,
+        logger = None
     ): 
                 
         # Store multilabel info
@@ -44,6 +46,8 @@ class MultiLabelSimulate(ReviewSimulate):
         self.random_state = np.random.RandomState(init_seed)
         self.eval_set = eval_set
         self.multilabel_flag = multilabel_flag
+        self.sgd_flag = sgd_flag
+        self.logger = logger
                 # If we have a label matrix, use our custom prior selection
         if self.label_matrix is not None and prior_indices is None:
             self.selected_articles = set()
@@ -51,8 +55,10 @@ class MultiLabelSimulate(ReviewSimulate):
             prior_indices = self._prior_knowledge()
         if self.multilabel_flag == True: 
             self.classifier = MultilabelClassifier(model, n_jobs=-1)
-        else: 
+        elif self.sgd_flag == True: 
             self.classifier = IncrementalClassifier(model)
+        else: 
+            self.classifier = model
 
         super().__init__(
             as_data=as_data,
@@ -69,7 +75,8 @@ class MultiLabelSimulate(ReviewSimulate):
             stop_if=stop_if,
             project=project, 
             review_id=review_id,
-            eval_set=eval_set
+            eval_set=eval_set,
+            logger=self.logger
         )
 
         
@@ -99,7 +106,7 @@ class MultiLabelSimulate(ReviewSimulate):
             #select irrelevant prior knowldege 
     
     def review(self):
-        """Override to handle multilabel data properly."""
+
         with open_state(self.project, review_id=self.review_id, read_only=False) as s:
             pending = s.get_pending()
             if not pending.empty:
@@ -120,25 +127,39 @@ class MultiLabelSimulate(ReviewSimulate):
         )
 
        # While the stopping condition has not been met:
-       
-        while not self._stop_review():
+        iteration = 1 
+        while not self._stop_review(iteration = iteration, labeled_count = len(self.labeled), logger = self.logger):
             # Train a new model.
+            print('Training classifier')
             start_time = timeit.default_timer()
             self.train()
             end_time_train = timeit.default_timer()
             train_time = end_time_train - start_time
-            print(f"Training time: {train_time} seconds")
+            
 
             # Query for new records to label.
+            print('Querying new records')
+            start_time_query = timeit.default_timer()
             record_ids = self._query(self.n_instances)
+            end_time_query = timeit.default_timer()
+            query_time = end_time_query - start_time_query
 
             # Label the records.
+            print('Labelling')
+            start_time_label = timeit.default_timer()
             labels = self._label(record_ids)
+            end_time_label = timeit.default_timer()
+            label_time = end_time_label - start_time_label
 
             # monitor progress here
             pbar_rel.update(sum(labels))
             pbar_total.update(len(labels))
+            end_time_total = timeit.default_timer() - start_time
+            print(f'Iteration finished: {iteration}, total elapsed time for this iteration: {end_time_total}')
+            self.logger.log_iteration_timings(iteration=iteration, train_time=train_time, query_time=query_time, label_time=label_time, total_iteration_time = end_time_total, labeled_count = len(self.labeled))
 
+            iteration +=1 
+            
         else:
             # write to state when stopped
             pbar_rel.close()
@@ -218,13 +239,12 @@ class MultiLabelSimulate(ReviewSimulate):
         )
         train_idx = np.where(y_sample_input != LABEL_NA)[0]
 
-        if self.training_set > 0: 
+        if self.training_set > 0 and self.sgd_flag == True: 
             self._incremental_fit(self.X, y_sample_input, train_idx)
 
         else: 
             X_train, y_train, all_idx = self.balance_model.sample(self.X, y_sample_input, train_idx)
-
-            #grab y_train indices 
+            #grab y_train indices for multiabel case 
             if self.multilabel_flag == True: 
                 y_train = self.label_matrix[all_idx]
             # Fit the classifier on the training data.

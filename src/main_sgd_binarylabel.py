@@ -1,4 +1,4 @@
-from extensions.multilabel_simulate import MultiLabelSimulate
+from extensions.multilabel_simulate import ExtendedSimulate
 from asreview.exceptions import *
 from asreview.project import ProjectExistsError, open_state
 from asreview.state.sqlstate import SQLiteState
@@ -21,14 +21,9 @@ import uuid
 import json
 import timeit
 
-# Setup logging
-logger = LoggerConfig.setup_logger(
-    logger_name="livingebg_screen_multilabel_workflow", 
-    log_dir=Path(__file__).parent / 'logs'
-)
 
-logger.info("Starting multilabel workflow")
-logger.info("Loading labelled data")
+print("Starting multilabel workflow")
+print("Loading labelled data")
 
 # Setup paths
 datadir = Path(__file__).parent / 'data'
@@ -63,7 +58,7 @@ multilabel_df.to_csv(dataset_path, index=False)
 
 classifier_dct = {
     'sgd_svm': SVMClassifier(),
-    'sgd_logistic': LogisticClassifier(),
+    # 'sgd_logistic': LogisticClassifier(),
     # 'binary_rf': RandomForestClassifier(),
    
     # 'binary_nb': NaiveBayesClassifier()
@@ -84,9 +79,9 @@ balance_model = DoubleBalance()
 
 # Store simulation metadata
 simconfig_list = []
-stopcriterion_interest = ['statistical']
+stopcriterion_interest = ['time']
 for feature_extract in feature_extract_dct.keys():
-    logger.info(f"Starting simulations with feature extraction: {feature_extract}")
+    print(f"Starting simulations with feature extraction: {feature_extract}")
     
     # Create one project per feature extraction method
     feature_project_path = resultdir / f"feature_{feature_extract}"
@@ -101,7 +96,7 @@ for feature_extract in feature_extract_dct.keys():
             project_name=f"Feature Extraction: {feature_extract}"
         )
     except ProjectExistsError: 
-        logger.info(f"Project for feature extraction: {feature_extract} already exists, loading existing project")
+        print(f"Project for feature extraction: {feature_extract} already exists, loading existing project")
         feature_project = ASReviewProject(feature_project_path)
     
     # Setup dataset
@@ -120,7 +115,7 @@ for feature_extract in feature_extract_dct.keys():
     # Now run all classifiers with this feature extraction
     for classifier in classifier_dct.keys():
         for stopcriterion in stopcriterion_interest:
-            logger.info(f"Running simulation with classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}")
+            print(f"Running simulation with classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}")
             
             # Get models
             train_model = classifier_dct[classifier]
@@ -131,7 +126,7 @@ for feature_extract in feature_extract_dct.keys():
                     stopcriterion, 
                     label_matrix=multilabel_df, 
                     recall_target=0.95,
-                    eval_set=eval_data_unique
+                    eval_set=eval_data_unique,
                 )
             else: 
                 stopcriterion_generator = CreateSimulationStoppingCriterion(stopcriterion)
@@ -141,7 +136,9 @@ for feature_extract in feature_extract_dct.keys():
                 # Create a unique review ID for this configuration
                 sim_name = f"{classifier}_{stopcriterion}"
                 simreview_id = f"{sim_name}_{uuid.uuid4().hex[:8]}"  # Add short UUID for uniqueness
-                
+                timing_log_paths = Path(__file__).parent / 'results' / f'feature_{feature_extract}' / 'reviews' 
+                timing_metric_logger = LoggerConfig(simreview_id).setup_logger(logger_name=f"timing_metrics_{simreview_id}", log_dir=Path(__file__).parent / timing_log_paths)
+
 
                 # # Create review in this feature project
                 state = SQLiteState(read_only=False)
@@ -149,14 +146,14 @@ for feature_extract in feature_extract_dct.keys():
                 feature_project.add_review(review_id=simreview_id)
 
                 #initalize state 
-                logger.info(f"Creating simulation with review ID: {simreview_id}")
+                timing_metric_logger.info(f"Creating simulation with review ID: {simreview_id}")
                 if stopping_criterion == None: 
-                    write_interval = 1000
+                    write_check_interval = 1000
                 else: 
-                    write_interval = 25
+                    write_check_interval = 20
                 # Create simulation
                 try:
-                    reviewer_sim = MultiLabelSimulate(
+                    reviewer_sim =  ExtendedSimulate(
                         as_data=data_obj,
                         model=train_model, 
                         query_model=query_model,
@@ -167,24 +164,27 @@ for feature_extract in feature_extract_dct.keys():
                         label_columns=label_cols,
                         n_prior_included=1, 
                         n_prior_excluded=1, 
-                        n_instances=25, #number of instances to label per iteration
+                        n_instances=write_check_interval, #number of instances to label per iteration
                         project=feature_project, 
                         stop_if=stopping_criterion, 
-                        write_interval=write_interval,
+                        write_interval=write_check_interval, #number of instances to write and check per iteration 
                         eval_total_relevant=len(eval_data_unique),
                         eval_set=eval_data_unique,
-                        review_id=simreview_id
+                        review_id=simreview_id, 
+                        logger=timing_metric_logger, 
+                        sgd_flag = True
                     )
+
                     
                     # Run simulation
-                    logger.info(f"Running simulation with review ID: {simreview_id}")
+                    timing_metric_logger.info(f"Running simulation with review ID: {simreview_id}")
                     start_time = timeit.default_timer()
                     reviewer_sim.review() #expted length of total_eval is 764
                     end_time = timeit.default_timer()
                     sim_time = end_time - start_time
-                    logger.info(f"Simulation finished in {end_time - start_time} seconds")
- 
-
+                    timing_metric_logger.info(f"Simulation finished in {end_time - start_time} seconds")
+                    timing_metric_logger.log_iteration_timings(iteration=-1, sim_time=sim_time)
+                   
                     
                     # Mark as finished
                     feature_project.mark_review_finished(review_id=simreview_id)
@@ -198,9 +198,11 @@ for feature_extract in feature_extract_dct.keys():
                         'stop_params': str(params), 
                         'simulation_time (s)': end_time - start_time
                     }
+
+
                     with open(resultdir / f"simulation_metadata_{simreview_id}.json", 'w') as f:
                         json.dump(simulation_metadata, f, indent=2)
-                    logger.info(f'Simulation finisehd for id: {simreview_id}, recall: {reviewer_sim.global_recall}, classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}, params: {params}')
+                    print(f'Simulation finisehd for id: {simreview_id}, recall: {reviewer_sim.global_recall}, classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}, params: {params}')
                     
                 except Exception as e:
                     raise e

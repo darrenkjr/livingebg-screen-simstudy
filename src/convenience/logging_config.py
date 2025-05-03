@@ -2,17 +2,22 @@ import logging
 from pathlib import Path
 from datetime import datetime 
 import colorlog
-
+import json 
 class LoggerConfig: 
+    '''
+    Class to handle logging for the review process 
+    '''
+    def __init__(self, review_id): 
+        self.review_id = review_id
+        self.logger = None
 
-    @staticmethod
-    def setup_logger(
-        logger_name: str, 
-        log_dir : Path = Path(__file__).parent.parent / 'logs', 
-        console_log_level : int = logging.INFO,
-        file_log_level : int = logging.WARNING,
-        log_level : int = logging.DEBUG
-    ) -> logging.Logger: 
+
+    def setup_logger(self, 
+                     logger_name: str, 
+                     log_dir : Path = Path(__file__).parent.parent / 'logs', 
+                     console_log_level : int = logging.INFO,
+                     file_log_level : int = logging.WARNING,
+                     log_level : int = logging.DEBUG): 
         
         '''
         Set up logger for inspection later: 
@@ -63,6 +68,44 @@ class LoggerConfig:
             #add handlers to logger 
             logger.addHandler(file_handler)
             logger.addHandler(console_handler)
+        
+        self.logger = logger
+    
+        return self 
+        
+    #delegation methods 
+    def info(self, msg): 
+        self.logger.info(msg)
 
-        return logger 
+    def debug(self, msg): 
+        self.logger.debug(msg)
+
+    def warning(self, msg): 
+        self.logger.warning(msg)
+
+    def log_iteration_timings(self, iteration, **metrics): 
+
+        '''
+        Log iteration timings and metrics 
+
+        Args: 
+            iteration (int): current iteration number 
+            
+        '''
+
+        data = {
+            'review_id': self.review_id,
+            'iteration': iteration,
+            'timestamp': datetime.now().isoformat(),
+            **metrics
+        }
+
+        log_file = Path(__file__).parent.parent / 'logs' / f'{self.review_id}_iteration_timings.jsonl'
+
+        with open(log_file, 'a') as f: 
+            
+            f.write(json.dumps(data) + '\n')
+
+        
+        
 

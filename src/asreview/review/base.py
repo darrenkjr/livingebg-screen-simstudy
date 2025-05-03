@@ -15,6 +15,7 @@ from asreview.models.feature_extraction.tfidf import Tfidf
 from asreview.models.query.max import MaxQuery
 from asreview.project import open_state
 from asreview.settings import ASReviewSettings
+import timeit
 
 
 class BaseReview(ABC):
@@ -63,7 +64,8 @@ class BaseReview(ABC):
         stop_if=None,
         start_idx=[],
         review_id=None,
-        eval_set=None
+        eval_set=None, 
+        logger=None
     ):
         """Initialize the reviewer base class, so that everything is ready to
         train a new model."""
@@ -83,6 +85,7 @@ class BaseReview(ABC):
         self.prior_indices = start_idx
         self.review_id = review_id
         self.eval_set = eval_set
+        self.logger = logger
         if n_papers is not None:
             logging.warning("Argument n_papers is deprecated, ignoring n_papers.")
 
@@ -109,10 +112,15 @@ class BaseReview(ABC):
             try:
                 self.X = self.project.get_feature_matrix(self.feature_extraction.name)
             except FileNotFoundError:
+                self.logger.info("Feature extraction started")
+                start_time_feature = timeit.default_timer()
                 self.X = self.feature_extraction.fit_transform(
                     as_data.texts, as_data.headings, as_data.bodies, as_data.keywords
                 )
-
+                end_time_feature = timeit.default_timer()
+                feature_extraction_time = end_time_feature - start_time_feature
+                self.logger.info(f"Feature extraction completed")
+                self.logger.log_iteration_timings(iteration=0, feature_extraction_time=feature_extraction_time)
                 # check if the number of records after the transform equals
                 # the number of records in the dataset
                 if self.X.shape[0] != len(as_data):
