@@ -183,3 +183,5 @@ results/
 logs/
 *.md
 *:Zone.Identifier
+recall_comparison.png
+training_time_comparison.png
