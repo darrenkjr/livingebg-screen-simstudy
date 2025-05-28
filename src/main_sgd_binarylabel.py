@@ -8,7 +8,7 @@ from extensions import *
 from convenience.logging_config import LoggerConfig
 import pandas as pd
 import numpy as np
-from asreview.models.classifiers import NaiveBayesClassifier, LogisticClassifier, RandomForestClassifier, SVMClassifier
+from asreview.models.classifiers import LogisticClassifier, SVMClassifier
 from asreview.models.feature_extraction import Tfidf
 from asreview.models.feature_extraction.sbert import SBERT
 from asreview.models.feature_extraction.specter2 import specter2
@@ -22,7 +22,7 @@ import json
 import timeit
 
 
-print("Starting multilabel workflow")
+print("Starting simulations")
 print("Loading labelled data")
 
 # Setup paths
@@ -52,15 +52,14 @@ dataset_path = Path(__file__).parent /'dataset' / "multilabel_dataset.csv"
 multilabel_df.to_csv(dataset_path, index=False)
 
 
-# Define models to test 
-
- #took out time and consecutive irrelevant can look at this retrospectively
-
 classifier_dct = {
-    'sgd_incremental_svm': SVMClassifier(),
-    'sgd_incremental_logistic': LogisticClassifier(),
-    'pool_svm': SVMClassifier(),
-    'pool_logistic': LogisticClassifier(),
+    'no_retrain_svm': SVMClassifier(), #no retraining at all between active learning iterations. Just initial training 
+    'no_retrain_logistic': LogisticClassifier(),
+    'adaptive_retrain_svm': SVMClassifier(), #training strategy dependent on error rates. Retrains on all data
+    'adaptive_retrain_logistic': LogisticClassifier(),
+    'sgd_incremental_svm': SVMClassifier(), # incremental training between active learning iterations , new data only 
+    'sgd_incremental_logistic': LogisticClassifier()
+
 }
 
 feature_extract_dct = {
@@ -78,7 +77,7 @@ balance_model = DoubleBalance()
 
 # Store simulation metadata
 simconfig_list = []
-stopcriterion_interest = ['statistical','time', 'consecutive_irrelevant']
+stopcriterion_interest = ['consecutive_irrelevant','statistical','time']
 for feature_extract in feature_extract_dct.keys():
     print(f"Starting simulations with feature extraction: {feature_extract}")
     
@@ -116,9 +115,17 @@ for feature_extract in feature_extract_dct.keys():
         for stopcriterion in stopcriterion_interest:
             print(f"Running simulation with classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}")
             if classifier.startswith('sgd'): 
-                sgd_flag = True
-            elif classifier.startswith('pool'): 
+                sgd_flag = True #incremental training between active learning iterations
+                no_retrain_flag = False
+                adaptive_retrain_flag = False
+            elif classifier.startswith('no_retrain'): 
+                no_retrain_flag = True #no retraining at all between active learning iterations
                 sgd_flag = False
+                adaptive_retrain_flag = False
+            elif classifier.startswith('adaptive_retrain'): 
+                adaptive_retrain_flag = True #training strategy dependent on error rates. Retrains on all data
+                sgd_flag = False
+                no_retrain_flag = False
             # Get models
             train_model = classifier_dct[classifier]
             
@@ -139,7 +146,10 @@ for feature_extract in feature_extract_dct.keys():
                 sim_name = f"{classifier}_{stopcriterion}"
                 simreview_id = f"{sim_name}_{uuid.uuid4().hex[:8]}"  # Add short UUID for uniqueness
                 timing_log_paths = Path(__file__).parent / 'results' / f'feature_{feature_extract}' / 'reviews' 
-                timing_metric_logger = LoggerConfig(simreview_id).setup_logger(logger_name=f"timing_metrics_{simreview_id}", log_dir=Path(__file__).parent / timing_log_paths)
+                timing_metric_logger = LoggerConfig(simreview_id).setup_logger(
+                    logger_name=f"timing_metrics_{simreview_id}", 
+                    log_dir=timing_log_paths  # Remove the extra Path(__file__).parent
+                )
 
 
                 # # Create review in this feature project
@@ -152,7 +162,7 @@ for feature_extract in feature_extract_dct.keys():
                 if stopping_criterion == None: 
                     write_check_interval = 1000
                 else: 
-                    write_check_interval = 20
+                    write_check_interval = 25
                 # Create simulation
                 try:
                     reviewer_sim =  ExtendedSimulate(
@@ -174,7 +184,9 @@ for feature_extract in feature_extract_dct.keys():
                         eval_set=eval_data_unique,
                         review_id=simreview_id, 
                         logger=timing_metric_logger, 
-                        sgd_flag = sgd_flag
+                        sgd_flag = sgd_flag,
+                        no_retrain_flag = no_retrain_flag,
+                        adaptive_retrain_flag = adaptive_retrain_flag
                     )
 
                     
@@ -202,7 +214,7 @@ for feature_extract in feature_extract_dct.keys():
                     }
 
 
-                    with open(resultdir / 'results' / f'feature_{feature_extract}'/f"simulation_metadata_{simreview_id}.json", 'w') as f:
+                    with open(resultdir / f'feature_{feature_extract}'/f"simulation_metadata_{simreview_id}.json", 'w') as f:
                         json.dump(simulation_metadata, f, indent=2)
                     print(f'Simulation finisehd for id: {simreview_id}, recall: {reviewer_sim.global_recall}, classifier: {classifier}, feature_extract: {feature_extract}, stopcriterion: {stopcriterion}, params: {params}')
                     
