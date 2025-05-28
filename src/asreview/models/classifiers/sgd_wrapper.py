@@ -1,4 +1,5 @@
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.frozen import FrozenEstimator
 from asreview.models.classifiers.base import BaseTrainClassifier
 import numpy as np
 from sklearn.linear_model import SGDClassifier
@@ -28,9 +29,8 @@ class IncrementalClassifier(BaseTrainClassifier):
         self.is_calibrated = False
 
         self._model = CalibratedClassifierCV(
-            self.sgd_model, 
-            method = 'sigmoid', 
-            cv = 'prefit'
+            FrozenEstimator(self.sgd_model),
+            method = 'sigmoid'
         )
         
 
@@ -61,9 +61,13 @@ class IncrementalClassifier(BaseTrainClassifier):
             # Use the calibrated model for predictions if possible 
             return self._model.predict_proba(X)
         else:
-            # Fallback to sigmoid calibration if no calibration is available
             scores = self.sgd_model.decision_function(X)
-            proba = 1.0 / (1.0 + np.exp(-scores))
+            proba = np.zeros_like(scores)
+            mask = scores >= 0
+            proba[mask] = 1.0 / (1.0 + np.exp(-scores[mask]))
+            exp_scores = np.exp(scores[~mask])
+            proba[~mask] = exp_scores / (1.0 + exp_scores)
+            
             return np.column_stack((1-proba, proba))
 
 
