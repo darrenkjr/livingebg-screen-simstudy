@@ -61,7 +61,6 @@ class ConsecutiveIrrelevantCriterion(BaseStoppingCriterion):
         super().__init__(f"consecutive_{percentage}")
         self.percentage = percentage
         self.name = f"consecutive_irrelevant_{percentage}"
-        self._last_checked_index = 0 
         
     def should_stop(self, state, **kwargs) -> bool:
         self.logger = kwargs.get('logger', None)
@@ -74,18 +73,13 @@ class ConsecutiveIrrelevantCriterion(BaseStoppingCriterion):
         if len(labelled) < window_size:
             return False
             
-        # Check last n papers where n is window_size
-        new_labels = labelled['label'].iloc[self._last_checked_index:]
-        #retrieve label columns 
-        self._last_checked_index = len(labelled)
-
-        if len(new_labels) >= window_size:
-            recent_window = new_labels.tail(window_size)
-            should_stop = (recent_window == 0).all()
-            iteration = kwargs.get('iteration', None)
-            labeled_count = kwargs.get('labeled_count', None)
-            self.logger.log_iteration_timings(iteration=iteration, labeled_count = labeled_count, consecutive_irrelevant_window = len(recent_window))
-            return should_stop  # True if all irrelevant
+        # Get the last window_size labels from the entire labeled set
+        recent_window = labelled['label'].tail(window_size)
+        should_stop = (recent_window == 0).all()
+        iteration = kwargs.get('iteration', None)
+        labeled_count = kwargs.get('labeled_count', None)
+        self.logger.log_iteration_timings(iteration=iteration, labeled_count = labeled_count, consecutive_irrelevant_window = len(recent_window))
+        return should_stop  # True if all irrelevant
 
 
 
