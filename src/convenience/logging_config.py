@@ -3,6 +3,8 @@ from pathlib import Path
 from datetime import datetime 
 import colorlog
 import json 
+import os
+
 class LoggerConfig: 
     '''
     Class to handle logging for the review process 
@@ -10,6 +12,7 @@ class LoggerConfig:
     def __init__(self, review_id): 
         self.review_id = review_id
         self.logger = None
+        self.log_dir = None  # Store log directory
 
 
     def setup_logger(self, 
@@ -30,6 +33,9 @@ class LoggerConfig:
         Returns: 
             logger.logger : ie: a logger instance to track progress and errors  
         '''
+        # Store log directory for later use
+        self.log_dir = log_dir
+
         #create log directory if it doesn't exist 
         log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -84,15 +90,13 @@ class LoggerConfig:
         self.logger.warning(msg)
 
     def log_iteration_timings(self, iteration, **metrics): 
-
         '''
-        Log iteration timings and metrics 
+        Log iteration timings and metrics with line buffering
 
         Args: 
             iteration (int): current iteration number 
-            
+            **metrics: timing metrics to log
         '''
-
         data = {
             'review_id': self.review_id,
             'iteration': iteration,
@@ -100,11 +104,14 @@ class LoggerConfig:
             **metrics
         }
 
-        log_file = Path(__file__).parent.parent / 'logs' / f'{self.review_id}_iteration_timings.jsonl'
+        # Use the same log directory that was specified during setup
+        log_file = self.log_dir / f'{self.review_id}_iteration_timings.jsonl'
 
-        with open(log_file, 'a') as f: 
-            
-            f.write(json.dumps(data) + '\n')
+        try:
+            with open(log_file, 'a', buffering=1) as f:  # Line buffering
+                f.write(json.dumps(data) + '\n')
+        except Exception as e:
+            print(f"Error writing timing data: {e}")
 
         
         
