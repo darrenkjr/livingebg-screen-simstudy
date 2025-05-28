@@ -33,8 +33,9 @@ class ExtendedSimulate(ReviewSimulate):
         review_id=None,
         eval_total_relevant=None, 
         eval_set=None, 
-        multilabel_flag = False, 
         sgd_flag = False,
+        no_retrain_flag = False,
+        adaptive_retrain_flag = False,
         logger = None
     ): 
                 
@@ -44,11 +45,19 @@ class ExtendedSimulate(ReviewSimulate):
         self.label_columns = label_columns
         self.random_state = np.random.RandomState(init_seed)
         self.eval_set = eval_set
-        self.multilabel_flag = multilabel_flag
         self.sgd_flag = sgd_flag
+        self.no_retrain_flag = no_retrain_flag
+        self.adaptive_retrain_flag = adaptive_retrain_flag
         self.logger = logger
         self.trained_record_ids = set()
-                # If we have a label matrix, use our custom prior selection
+        
+        # Initialize error tracking for adaptive retraining
+        if self.adaptive_retrain_flag:
+            self.overconfident_window = []  # Track overconfident errors
+            self.underconfident_window = [] # Track underconfident errors
+            self.window_size = 4   # Number of batches to track
+        
+        # If we have a label matrix, use our custom prior selection
         if self.label_matrix is not None and prior_indices is None:
             self.selected_articles = set()
             self.covered_topics = set()
@@ -57,8 +66,9 @@ class ExtendedSimulate(ReviewSimulate):
         #     self.classifier = MultilabelClassifier(model, n_jobs=-1)
         if self.sgd_flag == True: 
             self.classifier = IncrementalClassifier(model)
-        else: 
-            self.classifier = model
+        elif self.no_retrain_flag == True or self.adaptive_retrain_flag == True: 
+            self.classifier = model #use th batch model (retrain on entire dataset)
+
 
         super().__init__(
             as_data=as_data,
@@ -129,10 +139,33 @@ class ExtendedSimulate(ReviewSimulate):
        # While the stopping condition has not been met:
         iteration = 1 
         while not self._stop_review(iteration = iteration, labeled_count = len(self.labeled), logger = self.logger):
-
-
             start_time = timeit.default_timer()
-            self.train()
+
+            if self.sgd_flag == True: 
+                start_time_sgd = timeit.default_timer()
+                self.train()
+                end_time_sgd = timeit.default_timer()
+                sgd_time = end_time_sgd - start_time_sgd
+                self.logger.log_iteration_timings(iteration=iteration, sgd_time=sgd_time)
+
+            if self.no_retrain_flag == True: 
+                if iteration == 1: 
+                    start_time_initial = timeit.default_timer()
+                    self.train()
+                    end_time_initial = timeit.default_timer()
+                    initial_train_time = end_time_initial - start_time_initial
+                    self.logger.log_iteration_timings(iteration=iteration, initial_train_time=initial_train_time)
+                else: 
+                    pass
+
+            if self.adaptive_retrain_flag == True:
+                if iteration == 1: 
+                    start_time_initial = timeit.default_timer()
+                    self.train()
+                    end_time_initial = timeit.default_timer()
+                    initial_train_time = end_time_initial - start_time_initial
+                    self.logger.log_iteration_timings(iteration=iteration, initial_train_time=initial_train_time)
+
             end_time_train = timeit.default_timer()
             train_time = end_time_train - start_time
 
@@ -148,6 +181,13 @@ class ExtendedSimulate(ReviewSimulate):
             end_time_label = timeit.default_timer()
             label_time = end_time_label - start_time_label
 
+            #check for errros beween predictions and errors 
+            if self.adaptive_retrain_flag == True: 
+                start_time = timeit.default_timer()
+                self._error_adaptive_retrain(record_ids, labels)
+                end_time = timeit.default_timer()
+                total_time = end_time - start_time
+                self.logger.log_iteration_timings(iteration=iteration, adaptive_retrain_time=total_time)
             # monitor progress here
             pbar_rel.update(sum(labels))
             pbar_total.update(len(labels))
@@ -246,8 +286,8 @@ class ExtendedSimulate(ReviewSimulate):
             #fit on *all* data
             X_train, y_train, all_idx = self.balance_model.sample(self.X, y_sample_input, train_idx)
             #grab y_train indices for multiabel case 
-            if self.multilabel_flag == True: 
-                y_train = self.label_matrix[all_idx]
+            # if self.multilabel_flag == True: 
+            #     y_train = self.label_matrix[all_idx]
             # Fit the classifier on the training data.
             self.classifier.fit(X_train, y_train)
 
@@ -266,6 +306,7 @@ class ExtendedSimulate(ReviewSimulate):
         self.last_probabilities = relevance_scores[:, 1]
 
         self.training_set = len(current_labeled_ids)
+
 
     def _incremental_fit(self, X, y, train_idx, new_record_ids):
         """Fit the classifier on latest training data."""
@@ -289,3 +330,49 @@ class ExtendedSimulate(ReviewSimulate):
         labels = super()._label(record_ids, prior)
         
         return labels
+
+    def _error_adaptive_retrain(self, record_ids, labels):
+        """Check for prediction errors and retrain if error rate exceeds threshold.
+        
+        Args:
+            record_ids: List of record IDs that were just labeled
+            labels: List of true labels for those records
+        """
+        # Get the probabilities we already predicted during query
+        error_threshold = 0.10
+        record_indices = [np.where(self.record_table == rid)[0][0] for rid in record_ids]
+        predictions = self.last_probabilities[record_indices]
+        
+        # Check for overconfident errors (>0.80 confidence but actually irrelevant)
+        overconfident_errors = np.logical_and(predictions > 0.85, labels == 0)
+        
+        # Check for underconfident errors (<0.20 confidence but actually relevant)
+        underconfident_errors = np.logical_and(predictions < 0.15, labels == 1)
+        
+        # Add errors to respective windows
+        self.overconfident_window.extend(overconfident_errors)
+        self.underconfident_window.extend(underconfident_errors)
+        
+        # Calculate error rates when we have enough iterations
+        window_size_records = self.window_size * self.n_instances
+        if len(self.overconfident_window) >= window_size_records or len(self.underconfident_window) >= window_size_records:
+            # Calculate overconfident error rate
+            overconfident_errors = sum(self.overconfident_window[-window_size_records:])
+            overconfident_rate = overconfident_errors / window_size_records
+            
+            # Calculate underconfident error rate
+            underconfident_errors = sum(self.underconfident_window[-window_size_records:])
+            underconfident_rate = underconfident_errors / window_size_records
+            
+            # If either error rate exceeds threshold, retrain on all data
+            if overconfident_rate > error_threshold or underconfident_rate > error_threshold:  # 10% error threshold
+                self.logger.info(f"Pre-retrain error rates - Overconfident: {overconfident_rate:.2f}, Underconfident: {underconfident_rate:.2f}")
+                self.logger.info(f"Error rate exceeds threshold ({error_threshold}), retraining model")
+                self.train()  # Retrain on all labeled data
+                self.overconfident_window = []  # Reset error tracking
+                self.underconfident_window = []  # Reset error tracking
+            else:
+                # If we didn't retrain, maintain sliding window by removing oldest records
+                if len(self.overconfident_window) > window_size_records:
+                    self.overconfident_window = self.overconfident_window[-window_size_records:]
+                    self.underconfident_window = self.underconfident_window[-window_size_records:]
