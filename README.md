@@ -84,7 +84,7 @@ pixi run python main_sgd_binarylabel.py
 ### Expected Output
 The simulation will:
 1. Load the multi-label dataset, and convert this to a single label setup
-2. Run 90 different configurations (2 classifiers × 3 training approaches x 5 feature extractors × 3 stopping criteria)
+2. Run 90 different configurations (2 classifiers × 3 training approaches x 5 feature extractors × 3 stopping criteria) across specified stopping  criteria parameters 
 3. Generate results in `src/results/` directory
 4. Create timing logs for performance analysis
 
