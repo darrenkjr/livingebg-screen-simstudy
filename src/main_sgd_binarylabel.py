@@ -186,7 +186,8 @@ for feature_extract in feature_extract_dct.keys():
                         logger=timing_metric_logger, 
                         sgd_flag = sgd_flag,
                         no_retrain_flag = no_retrain_flag,
-                        adaptive_retrain_flag = adaptive_retrain_flag
+                        adaptive_retrain_flag = adaptive_retrain_flag,
+                        init_seed = 42
                     )
 
                     
